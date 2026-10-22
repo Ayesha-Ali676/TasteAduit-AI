@@ -26,7 +26,9 @@ export const AuditRequestSchema = z.object({
     .array(z.string().trim().max(200, { message: 'Constraint item cannot exceed 200 characters.' }))
     .max(20, { message: 'A maximum of 20 constraints may be specified.' })
     .optional()
-    .default([])
+    .default([]),
+
+  enableRepair: z.boolean().optional().default(false)
 });
 
 export type AuditRequestInput = z.infer<typeof AuditRequestSchema>;

@@ -18,7 +18,8 @@ export async function submitAudit(data: AuditFormData): Promise<AuditResponse> {
     recommendations: data.recommendations,
     audienceContext: data.audienceContext || undefined,
     location: data.location || undefined,
-    constraints: constraintsList
+    constraints: constraintsList,
+    enableRepair: true
   };
 
   const response = await fetch('/api/audit', {

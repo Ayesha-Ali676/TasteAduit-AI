@@ -1,6 +1,7 @@
 import { EvidenceClassification, QlooEvidenceProvenance, EntityResolutionResult } from '../qloo/qloo.types.js';
 import { NormalizedEvidenceResult } from '../evidence/evidence.types.js';
 import { ItemAuditResult, OverallAuditReport } from '../audit/audit.types.js';
+import { OverallRepairReport, RepairItemResult } from '../repair/repair.types.js';
 
 /**
  * Deterministic Scoring Weight Constants
@@ -151,6 +152,7 @@ export interface ItemResolutionEnvelope {
   resolution: EntityResolutionResult;
   evidence?: NormalizedEvidenceResult;
   audit?: ItemAuditResult;
+  repair?: RepairItemResult;
 }
 
 export interface ResolutionSummary {
@@ -180,6 +182,7 @@ export interface OrchestratorAuditResult {
   evidenceSummary?: EvidenceSummary;
   items?: ItemResolutionEnvelope[];
   auditReport?: OverallAuditReport;
+  repairReport?: OverallRepairReport;
   scaffoldDetails?: {
     note: string;
     deterministicModelReady: boolean;

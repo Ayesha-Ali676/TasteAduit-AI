@@ -7,12 +7,22 @@ import os from 'os';
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 
+export interface AIProviderConfig {
+  apiKey?: string;
+  model: string;
+  timeoutMs: number;
+}
+
 export interface AppConfig {
   port: number;
   nodeEnv: string;
   qloo: {
     baseUrl: string;
     apiKey?: string;
+  };
+  ai: {
+    groq: AIProviderConfig;
+    openRouter: AIProviderConfig;
   };
 }
 
@@ -55,6 +65,18 @@ export function loadConfig(): AppConfig {
     qloo: {
       baseUrl: baseUrl.replace(/\/+$/, ''),
       apiKey
+    },
+    ai: {
+      groq: {
+        apiKey: process.env.GROQ_API_KEY ? process.env.GROQ_API_KEY.trim() : undefined,
+        model: process.env.GROQ_MODEL?.trim() || 'llama-3.3-70b-versatile',
+        timeoutMs: parseInt(process.env.GROQ_TIMEOUT_MS || '8000', 10)
+      },
+      openRouter: {
+        apiKey: process.env.OPENROUTER_API_KEY ? process.env.OPENROUTER_API_KEY.trim() : undefined,
+        model: process.env.OPENROUTER_MODEL?.trim() || 'meta-llama/llama-3.3-70b-instruct',
+        timeoutMs: parseInt(process.env.OPENROUTER_TIMEOUT_MS || '10000', 10)
+      }
     }
   };
 }

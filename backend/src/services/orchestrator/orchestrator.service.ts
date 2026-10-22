@@ -11,29 +11,37 @@ import { RecommendationParser } from './parser.js';
 import { resolutionService, EntityResolutionService } from '../resolution/resolution.service.js';
 import { evidenceService, EvidenceRetrievalService } from '../evidence/evidence.service.js';
 import { auditEngine, CulturalGroundingAuditEngine } from '../audit/audit.service.js';
+import { repairService, RepairService } from '../repair/repair.service.js';
 import { NormalizedEvidenceResult } from '../evidence/evidence.types.js';
+import { OverallRepairReport, RepairItemResult } from '../repair/repair.types.js';
 import { logger } from '../../utils/logger.js';
 
 export class TasteAuditOrchestrator {
   private readonly resolutionSvc: EntityResolutionService;
   private readonly evidenceSvc: EvidenceRetrievalService;
   private readonly auditEngine: CulturalGroundingAuditEngine;
+  private readonly repairSvc: RepairService;
 
   constructor(
     resolutionSvc: EntityResolutionService = resolutionService,
     evidenceSvc: EvidenceRetrievalService = evidenceService,
-    auditEng: CulturalGroundingAuditEngine = auditEngine
+    auditEng: CulturalGroundingAuditEngine = auditEngine,
+    repairSvc: RepairService = repairService
   ) {
     this.resolutionSvc = resolutionSvc;
     this.evidenceSvc = evidenceSvc;
     this.auditEngine = auditEng;
+    this.repairSvc = repairSvc;
   }
 
   /**
    * Executes the bounded PARSE -> RESOLVE -> RETRIEVE -> AUDIT pipeline stages.
-   * Does NOT execute REPAIR or RE-AUDIT (reserved for subsequent phases).
+   * Optionally executes Stage 5 REPAIR & RE-AUDIT when options.enableRepair is true.
    */
-  public async executePipeline(input: ParseStageInput): Promise<OrchestratorAuditResult> {
+  public async executePipeline(
+    input: ParseStageInput,
+    options?: { enableRepair?: boolean }
+  ): Promise<OrchestratorAuditResult> {
     logger.info('Executing Stage 1: PARSE');
     const parsed = RecommendationParser.parse(input);
 
@@ -162,22 +170,62 @@ export class TasteAuditOrchestrator {
       input
     );
 
+    let repairReport: OverallRepairReport | undefined;
+    const stagesExecuted: Array<'PARSE' | 'RESOLVE' | 'RETRIEVE' | 'AUDIT' | 'REPAIR'> = [
+      'PARSE',
+      'RESOLVE',
+      'RETRIEVE',
+      'AUDIT'
+    ];
+
+    if (options?.enableRepair) {
+      logger.info('Executing Stage 5: REPAIR & RE-AUDIT');
+      stagesExecuted.push('REPAIR');
+      const repairResults: RepairItemResult[] = [];
+
+      for (const envelope of envelopes) {
+        const repairRes = await this.repairSvc.repairItem(envelope, {
+          audience: input.audienceContext,
+          location: input.location,
+          constraints: input.constraints
+        });
+        envelope.repair = repairRes;
+        repairResults.push(repairRes);
+      }
+
+      repairReport = this.repairSvc.aggregateRepairReport(repairResults);
+    }
+
+    const message = options?.enableRepair
+      ? 'TasteAudit Stages 1 (PARSE), 2 (RESOLVE), 3 (RETRIEVE), 4 (AUDIT), and 5 (REPAIR) executed successfully.'
+      : 'TasteAudit Stage 1 (PARSE), Stage 2 (RESOLVE), Stage 3 (RETRIEVE), and Stage 4 (AUDIT) executed successfully.';
+
     return {
       status: 'partial_pipeline',
-      message: 'TasteAudit Stage 1 (PARSE), Stage 2 (RESOLVE), Stage 3 (RETRIEVE), and Stage 4 (AUDIT) executed successfully.',
-      stagesExecuted: ['PARSE', 'RESOLVE', 'RETRIEVE', 'AUDIT'],
+      message,
+      stagesExecuted,
       input,
       parsedItems: parsed.items,
       resolutionSummary,
       evidenceSummary,
       items: envelopes,
       auditReport,
+      repairReport,
       scaffoldDetails: {
-        note: 'Stages 1 (PARSE), 2 (RESOLVE), 3 (RETRIEVE), and 4 (AUDIT) are actively implemented. Stages 5-6 (REPAIR, RE-AUDIT) will execute in subsequent phases.',
+        note: options?.enableRepair
+          ? 'Stages 1 (PARSE), 2 (RESOLVE), 3 (RETRIEVE), 4 (AUDIT), and 5 (REPAIR) are actively implemented.'
+          : 'Stages 1 (PARSE), 2 (RESOLVE), 3 (RETRIEVE), and 4 (AUDIT) are actively implemented. Stage 5 (REPAIR) executes when enabled.',
         deterministicModelReady: true,
         weights: SCORING_WEIGHTS
       }
     };
+  }
+
+  /**
+   * Executes the full pipeline including Stage 5 AI REPAIR & DETERMINISTIC RE-AUDIT.
+   */
+  public async executeRepairPipeline(input: ParseStageInput): Promise<OrchestratorAuditResult> {
+    return this.executePipeline(input, { enableRepair: true });
   }
 
   /**
