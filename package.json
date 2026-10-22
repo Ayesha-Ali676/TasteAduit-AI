@@ -1,0 +1,11 @@
+{
+  "name": "tasteaudit-ai",
+  "version": "0.1.0",
+  "description": "Cultural QA for AI Recommendations",
+  "private": true,
+  "author": "Hina Hanif",
+  "license": "MIT",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
