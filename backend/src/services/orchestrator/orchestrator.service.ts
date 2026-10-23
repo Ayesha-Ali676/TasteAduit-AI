@@ -14,39 +14,50 @@ import { auditEngine, CulturalGroundingAuditEngine } from '../audit/audit.servic
 import { repairService, RepairService } from '../repair/repair.service.js';
 import { NormalizedEvidenceResult } from '../evidence/evidence.types.js';
 import { OverallRepairReport, RepairItemResult } from '../repair/repair.types.js';
+import { agentLoop as defaultAgentLoop, TasteAuditAgentLoop } from '../agent/agent.loop.js';
+import { AgentExecutionTrace } from '../agent/agent.types.js';
 import { logger } from '../../utils/logger.js';
+
+export interface OrchestratorPipelineOptions {
+  enableRepair?: boolean;
+  enableAgent?: boolean;
+  maxIterations?: number;
+}
 
 export class TasteAuditOrchestrator {
   private readonly resolutionSvc: EntityResolutionService;
   private readonly evidenceSvc: EvidenceRetrievalService;
   private readonly auditEngine: CulturalGroundingAuditEngine;
   private readonly repairSvc: RepairService;
+  private readonly agentLoop: TasteAuditAgentLoop;
 
   constructor(
     resolutionSvc: EntityResolutionService = resolutionService,
     evidenceSvc: EvidenceRetrievalService = evidenceService,
     auditEng: CulturalGroundingAuditEngine = auditEngine,
-    repairSvc: RepairService = repairService
+    repairSvc: RepairService = repairService,
+    agentLoop: TasteAuditAgentLoop = defaultAgentLoop
   ) {
     this.resolutionSvc = resolutionSvc;
     this.evidenceSvc = evidenceSvc;
     this.auditEngine = auditEng;
     this.repairSvc = repairSvc;
+    this.agentLoop = agentLoop;
   }
 
   /**
    * Executes the bounded PARSE -> RESOLVE -> RETRIEVE -> AUDIT pipeline stages.
-   * Optionally executes Stage 5 REPAIR & RE-AUDIT when options.enableRepair is true.
+   * Optionally executes Stage 5 REPAIR & RE-AUDIT or Stage 6 AGENT LOOP.
    */
   public async executePipeline(
     input: ParseStageInput,
-    options?: { enableRepair?: boolean }
+    options?: OrchestratorPipelineOptions
   ): Promise<OrchestratorAuditResult> {
     logger.info('Executing Stage 1: PARSE');
     const parsed = RecommendationParser.parse(input);
 
     logger.info(`Extracted ${parsed.items.length} recommendation item(s). Executing Stage 2: RESOLVE & Stage 3: RETRIEVE`);
-    const envelopes: ItemResolutionEnvelope[] = [];
+    let envelopes: ItemResolutionEnvelope[] = [];
 
     let resolvedCount = 0;
     let ambiguousCount = 0;
@@ -165,20 +176,32 @@ export class TasteAuditOrchestrator {
       unresolvedCount: unresolvedEvidenceCount
     };
 
-    const auditReport = this.auditEngine.aggregateReport(
+    let auditReport = this.auditEngine.aggregateReport(
       envelopes.map((e) => e.audit!).filter(Boolean),
       input
     );
 
     let repairReport: OverallRepairReport | undefined;
-    const stagesExecuted: Array<'PARSE' | 'RESOLVE' | 'RETRIEVE' | 'AUDIT' | 'REPAIR'> = [
+    let agentTrace: AgentExecutionTrace | undefined;
+    const stagesExecuted: Array<'PARSE' | 'RESOLVE' | 'RETRIEVE' | 'AUDIT' | 'REPAIR' | 'RE-AUDIT'> = [
       'PARSE',
       'RESOLVE',
       'RETRIEVE',
       'AUDIT'
     ];
 
-    if (options?.enableRepair) {
+    if (options?.enableAgent) {
+      logger.info('Executing Stage 6: AGENT LOOP');
+      stagesExecuted.push('REPAIR', 'RE-AUDIT');
+      const agentResult = await this.agentLoop.runLoop(input, envelopes, auditReport, {
+        maxIterations: options.maxIterations,
+        enableAgent: true
+      });
+      envelopes = agentResult.envelopes;
+      auditReport = agentResult.auditReport;
+      repairReport = agentResult.repairReport;
+      agentTrace = agentResult.trace;
+    } else if (options?.enableRepair) {
       logger.info('Executing Stage 5: REPAIR & RE-AUDIT');
       stagesExecuted.push('REPAIR');
       const repairResults: RepairItemResult[] = [];
@@ -196,7 +219,9 @@ export class TasteAuditOrchestrator {
       repairReport = this.repairSvc.aggregateRepairReport(repairResults);
     }
 
-    const message = options?.enableRepair
+    const message = options?.enableAgent
+      ? 'TasteAudit Stage 6 (AGENT LOOP) executed successfully.'
+      : options?.enableRepair
       ? 'TasteAudit Stages 1 (PARSE), 2 (RESOLVE), 3 (RETRIEVE), 4 (AUDIT), and 5 (REPAIR) executed successfully.'
       : 'TasteAudit Stage 1 (PARSE), Stage 2 (RESOLVE), Stage 3 (RETRIEVE), and Stage 4 (AUDIT) executed successfully.';
 
@@ -211,14 +236,27 @@ export class TasteAuditOrchestrator {
       items: envelopes,
       auditReport,
       repairReport,
+      agentTrace,
       scaffoldDetails: {
-        note: options?.enableRepair
+        note: options?.enableAgent
+          ? 'Stage 6 (AGENT LOOP) is actively implemented with bounded iteration and structured trace.'
+          : options?.enableRepair
           ? 'Stages 1 (PARSE), 2 (RESOLVE), 3 (RETRIEVE), 4 (AUDIT), and 5 (REPAIR) are actively implemented.'
           : 'Stages 1 (PARSE), 2 (RESOLVE), 3 (RETRIEVE), and 4 (AUDIT) are actively implemented. Stage 5 (REPAIR) executes when enabled.',
         deterministicModelReady: true,
         weights: SCORING_WEIGHTS
       }
     };
+  }
+
+  /**
+   * Executes the full pipeline with Stage 6 AGENT LOOP.
+   */
+  public async executeAgentPipeline(
+    input: ParseStageInput,
+    options?: { maxIterations?: number }
+  ): Promise<OrchestratorAuditResult> {
+    return this.executePipeline(input, { enableAgent: true, ...options });
   }
 
   /**

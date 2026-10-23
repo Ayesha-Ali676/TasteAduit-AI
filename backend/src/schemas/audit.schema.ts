@@ -28,7 +28,9 @@ export const AuditRequestSchema = z.object({
     .optional()
     .default([]),
 
-  enableRepair: z.boolean().optional().default(false)
+  enableRepair: z.boolean().optional().default(false),
+  enableAgent: z.boolean().optional().default(false),
+  maxIterations: z.number().int().min(1).max(5).optional().default(3)
 });
 
 export type AuditRequestInput = z.infer<typeof AuditRequestSchema>;

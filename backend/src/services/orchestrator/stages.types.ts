@@ -2,6 +2,7 @@ import { EvidenceClassification, QlooEvidenceProvenance, EntityResolutionResult 
 import { NormalizedEvidenceResult } from '../evidence/evidence.types.js';
 import { ItemAuditResult, OverallAuditReport } from '../audit/audit.types.js';
 import { OverallRepairReport, RepairItemResult } from '../repair/repair.types.js';
+import { AgentExecutionTrace } from '../agent/agent.types.js';
 
 /**
  * Deterministic Scoring Weight Constants
@@ -183,6 +184,7 @@ export interface OrchestratorAuditResult {
   items?: ItemResolutionEnvelope[];
   auditReport?: OverallAuditReport;
   repairReport?: OverallRepairReport;
+  agentTrace?: AgentExecutionTrace;
   scaffoldDetails?: {
     note: string;
     deterministicModelReady: boolean;

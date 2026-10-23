@@ -9,7 +9,7 @@ auditRouter.post('/audit', async (req: Request, res: Response, next: NextFunctio
     // Validate request payload with Zod
     const validated = AuditRequestSchema.parse(req.body);
 
-    // Call orchestrator pipeline (Stage 1: PARSE -> Stage 2: RESOLVE -> Stage 3: RETRIEVE -> Stage 4: AUDIT -> Stage 5: REPAIR)
+    // Call orchestrator pipeline (Stages 1-4, optional Stage 5 Repair, optional Stage 6 Agent Loop)
     const result = await orchestrator.executePipeline(
       {
         rawRecommendation: validated.recommendations,
@@ -17,7 +17,11 @@ auditRouter.post('/audit', async (req: Request, res: Response, next: NextFunctio
         location: validated.location,
         constraints: validated.constraints
       },
-      { enableRepair: validated.enableRepair }
+      {
+        enableRepair: validated.enableRepair,
+        enableAgent: validated.enableAgent,
+        maxIterations: validated.maxIterations
+      }
     );
 
     res.status(200).json(result);
