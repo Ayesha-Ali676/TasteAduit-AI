@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { checkBackendHealth } from '../lib/api';
-import { ShieldCheck, Activity } from 'lucide-react';
 
 export const Header: React.FC = () => {
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
@@ -18,31 +17,38 @@ export const Header: React.FC = () => {
   }, []);
 
   return (
-    <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10 px-6 py-4">
-      <div className="max-w-6xl mx-auto flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-indigo-600 rounded-lg text-white">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              TasteAudit AI
-              <span className="text-xs font-medium px-2 py-0.5 rounded bg-indigo-950 text-indigo-400 border border-indigo-800">
-                Phase 2 Scaffold
-              </span>
-            </h1>
-            <p className="text-xs text-slate-400">Cultural QA for AI Recommendations</p>
-          </div>
+    <header className="border-b border-sage-mint/80 bg-white/85 backdrop-blur-md sticky top-0 z-40 transition-colors">
+      <div className="max-w-5xl mx-auto px-6 h-18 flex items-center justify-between">
+        {/* Brand */}
+        <div className="flex items-baseline gap-3">
+          <span className="text-xl font-bold tracking-tight text-sage-dark">
+            TasteAudit <span className="text-sage font-extrabold">AI</span>
+          </span>
+          <span className="hidden sm:inline text-xs text-sage-muted font-normal tracking-wide">
+            Cultural QA for AI Recommendations
+          </span>
         </div>
 
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-2 text-xs">
-            <Activity className={`w-4 h-4 ${backendStatus === 'connected' ? 'text-emerald-400' : backendStatus === 'checking' ? 'text-amber-400' : 'text-rose-400'}`} />
-            <span className="text-slate-400">Backend API:</span>
-            <span className={`font-medium ${backendStatus === 'connected' ? 'text-emerald-400' : backendStatus === 'checking' ? 'text-amber-400' : 'text-rose-400'}`}>
-              {backendStatus === 'connected' ? 'Healthy' : backendStatus === 'checking' ? 'Connecting...' : 'Disconnected'}
+        {/* Status */}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-sage-mint/40 border border-sage-mint text-xs">
+            <span
+              className={`w-2 h-2 rounded-full transition-colors ${
+                backendStatus === 'connected'
+                  ? 'bg-sage animate-pulse'
+                  : backendStatus === 'checking'
+                  ? 'bg-amber-500'
+                  : 'bg-rose-500'
+              }`}
+            />
+            <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-sage-dark">
+              {backendStatus === 'connected' ? 'QLOO CONNECTED' : backendStatus === 'checking' ? 'QLOO CONNECTING' : 'QLOO OFFLINE'}
             </span>
           </div>
+
+          <span className="hidden md:inline text-xs text-sage-muted font-normal">
+            Powered by <strong className="text-sage-dark font-semibold">Qloo</strong>
+          </span>
         </div>
       </div>
     </header>

@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
-import { AuditForm } from '../components/AuditForm';
-import { AuditResultsPlaceholder } from '../components/AuditResultsPlaceholder';
-import { AuditFormData, AuditResponse } from '../types/audit';
+import { Hero } from '../components/Hero';
+import { RecommendationComposer } from '../components/RecommendationComposer';
+import { AuditResultsView } from '../components/AuditResultsView';
+import { EvidenceDrawer } from '../components/EvidenceDrawer';
+import { AuditFormData, AuditResponse, ItemResolutionEnvelope } from '../types/audit';
 import { submitAudit } from '../lib/api';
-import { Compass } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 
 export const Home: React.FC = () => {
   const [response, setResponse] = useState<AuditResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasSubmitted, setHasSubmitted] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [selectedEnvelope, setSelectedEnvelope] = useState<ItemResolutionEnvelope | null>(null);
 
   const handleSubmit = async (data: AuditFormData) => {
     setIsLoading(true);
@@ -18,45 +21,76 @@ export const Home: React.FC = () => {
       const res = await submitAudit(data);
       setResponse(res);
       setHasSubmitted(true);
+      // Smooth scroll to top of results
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'An unexpected error occurred while communicating with backend.');
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : 'An unexpected error occurred while communicating with the TasteAudit backend.'
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  return (
-    <main className="max-w-6xl mx-auto px-6 py-8 space-y-8">
-      {/* Hero Section */}
-      <div className="text-center space-y-3 max-w-2xl mx-auto pt-4 pb-2">
-        <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-indigo-950/70 text-indigo-400 text-xs font-medium border border-indigo-800/80 mb-1">
-          <Compass className="w-3.5 h-3.5" />
-          <span>Cultural Intelligence & Recommendation QA</span>
-        </div>
-        <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
-          Make every AI recommendation <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-violet-300">culturally accountable</span>
-        </h2>
-        <p className="text-sm text-slate-400">
-          Audit AI-generated lifestyle, dining, music, and travel recommendations against structured taste intelligence from Qloo.
-        </p>
-      </div>
+  const handleNewAudit = () => {
+    setHasSubmitted(false);
+    setResponse(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-      {/* Error alert if backend communication fails */}
+  return (
+    <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-12">
+      {/* Error Notice in light theme */}
       {errorMsg && (
-        <div className="p-4 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-300 text-sm">
-          <strong>Request Failed: </strong> {errorMsg}
+        <div className="max-w-4xl mx-auto p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-sm flex items-start gap-3 shadow-xs">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div>
+            <strong className="font-semibold text-rose-950">Audit Request Notice: </strong>
+            <span>{errorMsg}</span>
+          </div>
         </div>
       )}
 
-      {/* Primary Interaction Area */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        <div className="lg:col-span-5">
-          <AuditForm onSubmit={handleSubmit} isLoading={isLoading} />
+      {/* STATE 1: INITIAL COMPOSER & HERO (When not yet audited or resetting) */}
+      {!hasSubmitted && (
+        <div className="space-y-10 sm:space-y-12">
+          {/* Concise, Powerful Light Hero */}
+          <Hero />
+
+          {/* Primary Recommendation Composer Workspace */}
+          <RecommendationComposer
+            onSubmit={handleSubmit}
+            isLoading={isLoading}
+            stagesExecuted={response?.stagesExecuted}
+          />
+
+          {/* Elegant, Quiet Empty State in Light Sage */}
+          <div className="text-center pt-2 pb-6">
+            <p className="text-xs text-sage-muted tracking-wide font-normal">
+              Paste an AI recommendation and test its cultural fit &bull; Powered by Qloo taste graph
+            </p>
+          </div>
         </div>
-        <div className="lg:col-span-7">
-          <AuditResultsPlaceholder response={response} hasSubmitted={hasSubmitted} />
-        </div>
-      </div>
+      )}
+
+      {/* STATE 2: THE RESULTS EXPERIENCE (When audit completes) */}
+      {hasSubmitted && response && (
+        <AuditResultsView
+          response={response}
+          onNewAudit={handleNewAudit}
+          onSelectEntityForEvidence={(env) => setSelectedEnvelope(env)}
+        />
+      )}
+
+      {/* Slide-over Evidence Drawer */}
+      <EvidenceDrawer
+        envelope={selectedEnvelope}
+        onClose={() => setSelectedEnvelope(null)}
+      />
     </main>
   );
 };
+
+export default Home;

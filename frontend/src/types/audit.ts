@@ -3,6 +3,7 @@ export interface AuditFormData {
   audienceContext: string;
   location: string;
   constraints: string;
+  enableAgent?: boolean;
 }
 
 export interface NormalizedCandidate {
@@ -137,6 +138,73 @@ export interface OverallAuditReport {
   };
 }
 
+export interface RepairItemResult {
+  originalItem: string;
+  status: 'repaired' | 'no_repair' | 'repair_failed' | 'insufficient_evidence';
+  repairStrategy?: string;
+  selectedCandidate?: {
+    name: string;
+    entityId: string;
+    type?: string;
+  };
+  reasoning: string;
+  beforeAudit: ItemAuditResult;
+  afterAudit?: ItemAuditResult;
+  scoreDelta?: number;
+  verifiedImprovement?: boolean;
+  providerUsed?: string;
+  evidenceRefs: string[];
+  constraintHandling?: string[];
+  repairedEnvelope?: ItemResolutionEnvelope;
+}
+
+export interface OverallRepairReport {
+  totalItemsAudited: number;
+  itemsRepairedCount: number;
+  itemsSkippedCount: number;
+  itemsFailedCount: number;
+  averageScoreBefore: number;
+  averageScoreAfter: number;
+  netImprovement: number;
+  repairedItems: RepairItemResult[];
+}
+
+export interface AgentTraceEvent {
+  step: number;
+  iteration: number;
+  state: string;
+  decision: 'ACCEPT' | 'REPAIR' | 'MORE_EVIDENCE' | 'STOP';
+  targetItemId?: string;
+  targetItemName?: string;
+  reasoning: string;
+  actionPerformed?: {
+    action: string;
+    candidateSelected?: {
+      id: string;
+      name: string;
+      type?: string;
+    };
+  };
+  scoreBefore?: number;
+  scoreAfter?: number;
+  scoreDelta?: number;
+  evidenceRefs: string[];
+  stopReason?: string;
+  timestamp: string;
+  durationMs: number;
+}
+
+export interface AgentExecutionTrace {
+  totalIterations: number;
+  terminalState: 'ACCEPTED' | 'STOPPED' | 'FAILED';
+  finalStopReason: string;
+  totalDurationMs: number;
+  initialOverallScore: number;
+  finalOverallScore: number;
+  netScoreImprovement: number;
+  events: AgentTraceEvent[];
+}
+
 export interface ItemResolutionEnvelope {
   item: {
     id: string;
@@ -145,6 +213,7 @@ export interface ItemResolutionEnvelope {
   resolution: EntityResolutionResult;
   evidence?: NormalizedEvidenceResult;
   audit?: ItemAuditResult;
+  repair?: RepairItemResult;
 }
 
 export interface ResolutionSummary {
@@ -175,6 +244,8 @@ export interface AuditResponse {
   evidenceSummary?: EvidenceSummary;
   items?: ItemResolutionEnvelope[];
   auditReport?: OverallAuditReport;
+  repairReport?: OverallRepairReport;
+  agentTrace?: AgentExecutionTrace;
   scaffoldDetails?: {
     note: string;
     deterministicModelReady: boolean;
