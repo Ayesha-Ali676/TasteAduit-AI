@@ -124,6 +124,7 @@ export class RepairService {
               type: cand.type,
               category: cand.category,
               tags: cand.tags || [],
+              imageUrl: cand.imageUrl,
               relationship: 'qloo_cultural_search'
             });
           }
@@ -396,6 +397,7 @@ Analyze the grounding deficiencies and select the best verified candidate from t
           category: matchedVerifiedCandidate.category,
           source: 'qloo',
           tags: matchedVerifiedCandidate.tags,
+          imageUrl: matchedVerifiedCandidate.imageUrl,
           retrievedAt: new Date().toISOString()
         },
         candidates: [],
@@ -422,7 +424,8 @@ Analyze the grounding deficiencies and select the best verified candidate from t
     const candidateSelection: RepairedCandidateSelection = {
       name: matchedVerifiedCandidate.name,
       entityId: matchedVerifiedCandidate.entityId,
-      type: matchedVerifiedCandidate.type
+      type: matchedVerifiedCandidate.type,
+      imageUrl: matchedVerifiedCandidate.imageUrl
     };
 
     logger.info(

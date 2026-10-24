@@ -524,4 +524,29 @@ describe('Stage 4: Deterministic Cultural Grounding Audit Engine', () => {
     expect(report.decision.status).toBe('supported');
     expect(report.itemsSummary.supportedCount).toBe(2);
   });
+
+  // 22. Visual presentation-only invariance (Stage 7C-2)
+  it('should guarantee that imageUrl is strictly presentation-only and does NOT affect scoring', () => {
+    const envelopeWithoutImage = createResolvedEnvelope();
+    const envelopeWithImage = createResolvedEnvelope({
+      resolution: {
+        ...envelopeWithoutImage.resolution,
+        resolvedEntity: {
+          ...envelopeWithoutImage.resolution.resolvedEntity!,
+          imageUrl: 'https://images.qloo.com/i/ent_pulp-420x-auto.jpg'
+        }
+      }
+    });
+
+    const resultWithoutImage = engine.auditItem(envelopeWithoutImage);
+    const resultWithImage = engine.auditItem(envelopeWithImage);
+
+    // Exact score and dimension invariance
+    expect(resultWithImage.overallScore).toBe(resultWithoutImage.overallScore);
+    expect(resultWithImage.decision.status).toBe(resultWithoutImage.decision.status);
+    expect(resultWithImage.dimensions.culturalAlignment.score).toBe(resultWithoutImage.dimensions.culturalAlignment.score);
+    expect(resultWithImage.dimensions.contextualRelevance.score).toBe(resultWithoutImage.dimensions.contextualRelevance.score);
+    expect(resultWithImage.dimensions.constraintCompliance.score).toBe(resultWithoutImage.dimensions.constraintCompliance.score);
+    expect(resultWithImage.dimensions.evidenceCompleteness.score).toBe(resultWithoutImage.dimensions.evidenceCompleteness.score);
+  });
 });

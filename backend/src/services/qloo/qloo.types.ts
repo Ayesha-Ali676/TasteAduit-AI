@@ -103,6 +103,7 @@ export interface NormalizedCandidate {
   category: 'entity' | 'tag';
   popularity?: number;
   disambiguation?: string;
+  imageUrl?: string;
   tags?: string[];
   source: 'qloo';
   retrievedAt: string;

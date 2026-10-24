@@ -7,6 +7,10 @@ export class CandidateNormalizer {
   public static normalizeEntity(raw: QlooRawEntity, timestamp = new Date().toISOString()): NormalizedCandidate {
     const primaryType = raw.types && raw.types.length > 0 ? raw.types[0] : 'urn:entity:unknown';
     const tagNames = raw.tags ? raw.tags.map((t) => t.name).filter(Boolean) : [];
+    const rawImage = raw.properties?.image as { url?: string } | undefined;
+    const imageUrl = typeof rawImage?.url === 'string' && rawImage.url.trim().length > 0
+      ? rawImage.url.trim()
+      : undefined;
 
     return {
       id: raw.entity_id,
@@ -15,6 +19,7 @@ export class CandidateNormalizer {
       category: 'entity',
       popularity: typeof raw.popularity === 'number' ? raw.popularity : undefined,
       disambiguation: raw.disambiguation || undefined,
+      imageUrl,
       tags: tagNames.length > 0 ? tagNames : undefined,
       source: 'qloo',
       retrievedAt: timestamp,
@@ -30,6 +35,10 @@ export class CandidateNormalizer {
    */
   public static normalizeTag(raw: QlooRawTag, timestamp = new Date().toISOString()): NormalizedCandidate {
     const parentTypes = raw.parents ? raw.parents.map((p) => p.type).filter(Boolean) : [];
+    const rawImage = raw.properties?.image as { url?: string } | undefined;
+    const imageUrl = typeof rawImage?.url === 'string' && rawImage.url.trim().length > 0
+      ? rawImage.url.trim()
+      : undefined;
 
     return {
       id: raw.id,
@@ -38,6 +47,7 @@ export class CandidateNormalizer {
       category: 'tag',
       popularity: typeof raw.popularity === 'number' ? raw.popularity : undefined,
       disambiguation: typeof raw.properties?.description === 'string' ? raw.properties.description : undefined,
+      imageUrl,
       tags: parentTypes.length > 0 ? parentTypes : undefined,
       source: 'qloo',
       retrievedAt: timestamp,

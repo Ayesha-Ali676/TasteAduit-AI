@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ItemResolutionEnvelope } from '../types/audit';
-import { X, ShieldCheck, Database, Radio, Sparkles, CheckCircle2, AlertTriangle, HelpCircle } from 'lucide-react';
+import { X, ShieldCheck, Database, Radio, Sparkles, CheckCircle2, AlertTriangle, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface EvidenceDrawerProps {
   envelope: ItemResolutionEnvelope | null;
@@ -11,6 +11,8 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
   envelope,
   onClose,
 }) => {
+  const [showAllTags, setShowAllTags] = useState<boolean>(false);
+
   if (!envelope) return null;
 
   const item = envelope.item;
@@ -24,13 +26,32 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
     resolution.provenance.classification ||
     'Unverified';
 
+  const tags = resolvedEntity?.tags || [];
+  const initialTagLimit = 8;
+  const displayedTags = showAllTags ? tags : tags.slice(0, initialTagLimit);
+  const remainingTagsCount = Math.max(0, tags.length - initialTagLimit);
+
+  // Helper to format signal type into human-friendly language
+  const formatSignalLabel = (signalType: string, relationship?: string) => {
+    if (signalType === 'taste_affinity') {
+      return relationship ? `High Taste Affinity (${relationship})` : 'High Taste Affinity';
+    }
+    if (signalType === 'spatial_proximity' || signalType === 'location') {
+      return 'Geographic / Spatial Match';
+    }
+    if (signalType === 'tag_correlation') {
+      return 'Cultural Tag Correlation';
+    }
+    return signalType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-sage-dark/30 backdrop-blur-xs transition-opacity">
       {/* Backdrop click to dismiss */}
       <div className="flex-1" onClick={onClose} />
 
       {/* Drawer Panel: Crisp White with Soft Sage Borders */}
-      <div className="w-full max-w-xl bg-white border-l-2 border-sage-soft shadow-2xl flex flex-col h-full overflow-hidden text-sage-dark">
+      <div className="w-full max-w-xl bg-white border-l-2 border-sage-soft shadow-2xl flex flex-col h-full overflow-hidden text-sage-dark font-sans">
         {/* Header */}
         <div className="p-6 border-b border-sage-mint flex items-start justify-between bg-sage-mint/30">
           <div>
@@ -39,14 +60,14 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
                 <Database className="w-3.5 h-3.5 text-sage" />
               </span>
               <span className="text-xs font-bold uppercase tracking-wider text-sage-dark">
-                Qloo Cultural Reference Signal
+                Verified Cultural Evidence
               </span>
             </div>
             <h2 className="text-xl font-bold text-sage-dark tracking-tight">
               {item.name}
             </h2>
             <p className="text-xs text-sage-muted mt-0.5">
-              Empirical taste graph inspection &amp; provenance records
+              Evidence source: Qloo Cultural Intelligence Graph
             </p>
           </div>
 
@@ -97,14 +118,35 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
                 Resolved Qloo Taste Entity
               </h4>
 
-              <div className="p-4 rounded-2xl bg-white border border-sage-mint space-y-2.5 font-mono text-xs shadow-xs">
+              <div className="p-4 rounded-2xl bg-white border border-sage-mint space-y-2.5 text-xs shadow-xs">
+                {resolvedEntity.imageUrl && (
+                  <div className="flex items-center gap-3 pb-3 border-b border-sage-mint">
+                    <img
+                      src={resolvedEntity.imageUrl}
+                      alt={resolvedEntity.name}
+                      className="w-14 h-14 object-cover rounded-xl border border-sage-mint shadow-xs bg-sage-soft/30 shrink-0"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                      loading="lazy"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] font-bold text-sage-dark truncate">{resolvedEntity.name}</div>
+                      <div className="text-[10px] text-sage-muted flex items-center gap-1 mt-0.5">
+                        <span>Visual reference</span>
+                        <span className="text-gray-300">•</span>
+                        <span>Qloo verified metadata</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-between items-center text-sage-dark">
                   <span className="text-sage-muted">Canonical Name:</span>
-                  <span className="text-sage-dark font-bold font-sans">{resolvedEntity.name}</span>
+                  <span className="text-sage-dark font-bold">{resolvedEntity.name}</span>
                 </div>
                 <div className="flex justify-between items-center text-sage-dark">
                   <span className="text-sage-muted">Entity ID:</span>
-                  <span className="text-sage-dark font-semibold">{resolvedEntity.id}</span>
+                  <span className="text-sage-dark font-mono text-[11px]">{resolvedEntity.id}</span>
                 </div>
                 <div className="flex justify-between items-center text-sage-dark">
                   <span className="text-sage-muted">Type / Category:</span>
@@ -118,12 +160,35 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
                     </span>
                   </div>
                 )}
-                {resolvedEntity.tags && resolvedEntity.tags.length > 0 && (
-                  <div className="pt-2 border-t border-sage-mint">
-                    <span className="text-sage-muted text-[11px] block mb-1.5">Cultural Tags:</span>
+
+                {/* Cultural Tags with +X More Toggle */}
+                {tags.length > 0 && (
+                  <div className="pt-2.5 border-t border-sage-mint">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-sage-muted text-[11px] font-semibold">
+                        Cultural Tags ({tags.length}):
+                      </span>
+                      {tags.length > initialTagLimit && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllTags(!showAllTags)}
+                          className="text-[11px] font-semibold text-sage-dark hover:text-sage flex items-center gap-1 transition cursor-pointer"
+                        >
+                          {showAllTags ? (
+                            <>Show fewer <ChevronUp className="w-3 h-3" /></>
+                          ) : (
+                            <>+ {remainingTagsCount} more <ChevronDown className="w-3 h-3" /></>
+                          )}
+                        </button>
+                      )}
+                    </div>
+
                     <div className="flex flex-wrap gap-1">
-                      {resolvedEntity.tags.map((t, idx) => (
-                        <span key={idx} className="px-2 py-0.5 rounded bg-sage-mint/50 text-sage-dark border border-sage-mint text-[11px]">
+                      {displayedTags.map((t, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded bg-sage-mint/40 text-sage-dark border border-sage-mint text-[11px]"
+                        >
                           {t}
                         </span>
                       ))}
@@ -142,26 +207,46 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
             </h4>
 
             {evidence && evidence.signals && evidence.signals.length > 0 ? (
-              <div className="space-y-2">
-                {evidence.signals.map((sig, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3.5 rounded-xl bg-white border border-sage-mint flex items-center justify-between text-xs font-mono shadow-xs"
-                  >
-                    <div>
-                      <span className="text-sage-dark font-bold mr-2">[{sig.signalType}]</span>
-                      <span className="text-sage-dark font-sans font-medium">{sig.relatedEntityName || 'Entity Reference'}</span>
-                      {sig.relationship && (
-                        <span className="text-sage-muted ml-1.5 text-[11px]">({sig.relationship})</span>
+              <div className="space-y-2.5">
+                {evidence.signals.map((sig, idx) => {
+                  const percentage = sig.value !== undefined ? (sig.value * 100).toFixed(1) : undefined;
+                  const label = formatSignalLabel(sig.signalType, sig.relationship);
+
+                  return (
+                    <div
+                      key={idx}
+                      className="p-3.5 rounded-xl bg-white border border-sage-mint space-y-2 shadow-xs"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <div>
+                          <strong className="text-sage-dark font-bold text-sm block">
+                            {sig.relatedEntityName || 'Entity Reference'}
+                          </strong>
+                          <span className="text-sage-muted text-[11px]">
+                            {label}
+                          </span>
+                        </div>
+                        {percentage !== undefined && (
+                          <div className="text-right">
+                            <span className="font-bold text-sage-dark text-xs bg-sage-mint px-2 py-0.5 rounded border border-sage-soft">
+                              {percentage}% match
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Visual affinity score bar */}
+                      {sig.value !== undefined && (
+                        <div className="w-full h-1.5 rounded-full bg-sage-mint/50 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-sage transition-all duration-500"
+                            style={{ width: `${Math.min(100, Math.max(0, sig.value * 100))}%` }}
+                          />
+                        </div>
                       )}
                     </div>
-                    {sig.value !== undefined && (
-                      <span className="font-bold text-sage-dark bg-sage-mint px-2 py-0.5 rounded border border-sage-soft">
-                        {(sig.value * 100).toFixed(1)}% affinity
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="p-4 rounded-xl bg-[#FAFDF9] border border-sage-mint text-xs text-sage-muted italic">
@@ -177,26 +262,26 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
               Evidence Provenance &amp; Isolation
             </h4>
 
-            <div className="p-4 rounded-2xl bg-white border border-sage-mint space-y-2 text-[11px] font-mono text-sage-muted shadow-xs">
+            <div className="p-4 rounded-2xl bg-white border border-sage-mint space-y-2 text-[11px] text-sage-muted shadow-xs">
               <div className="flex justify-between">
-                <span>Signal Source:</span>
-                <span className="text-sage-dark font-semibold">Qloo Cultural AI Graph</span>
+                <span>Evidence Source:</span>
+                <span className="text-sage-dark font-semibold">Qloo Cultural Intelligence Graph</span>
               </div>
               <div className="flex justify-between">
                 <span>API Endpoint:</span>
-                <span className="text-sage-dark">
+                <span className="text-sage-dark font-mono text-[10px]">
                   {evidence?.provenance.endpoint || 'hackathon.api.qloo.com/v2/search'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span>Correlation ID:</span>
-                <span className="text-sage-dark truncate max-w-[200px]">
+                <span className="text-sage-dark font-mono text-[10px] truncate max-w-[200px]">
                   {evidence?.provenance.correlationId || resolution.provenance.correlationId || 'N/A'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span>Credential Security:</span>
-                <span className="text-sage-dark font-bold">Strictly Isolated Server-Side</span>
+                <span className="text-sage-dark font-semibold">Strictly Isolated Server-Side</span>
               </div>
             </div>
           </div>
@@ -204,7 +289,7 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
 
         {/* Footer */}
         <div className="p-4 border-t border-sage-mint bg-sage-mint/20 flex items-center justify-between text-xs text-sage-muted">
-          <span>Powered by Qloo cultural intelligence</span>
+          <span>Evidence source: Qloo Cultural Intelligence Graph</span>
           <button
             type="button"
             onClick={onClose}

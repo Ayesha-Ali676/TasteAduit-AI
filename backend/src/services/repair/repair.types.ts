@@ -7,6 +7,7 @@ export interface RepairedCandidateSelection {
   name: string;
   entityId: string;
   type: string;
+  imageUrl?: string;
 }
 
 export interface RepairItemResult {

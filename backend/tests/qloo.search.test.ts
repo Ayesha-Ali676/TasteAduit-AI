@@ -181,4 +181,45 @@ describe('ServerQlooClient & Normalization (Mocked Boundary)', () => {
     const deduped = CandidateNormalizer.deduplicate([c1, c2]);
     expect(deduped).toHaveLength(1);
   });
+
+  it('should map properties.image.url to imageUrl when present on raw entity and tag', () => {
+    const rawEntityWithImage: QlooRawEntity = {
+      entity_id: 'ent_movie_pulp',
+      name: 'Pulp Fiction',
+      types: ['urn:entity:movie'],
+      properties: {
+        image: {
+          url: 'https://images.qloo.com/i/ent_movie_pulp-420x-auto.jpg'
+        }
+      }
+    };
+
+    const normalized = CandidateNormalizer.normalizeEntity(rawEntityWithImage);
+    expect(normalized.imageUrl).toBe('https://images.qloo.com/i/ent_movie_pulp-420x-auto.jpg');
+
+    const rawTagWithImage: QlooRawTag = {
+      id: 'tag_1',
+      name: 'Indie Rock',
+      type: 'genre',
+      properties: {
+        image: {
+          url: 'https://images.qloo.com/i/tag_1-420x-auto.jpg'
+        }
+      }
+    };
+
+    const normalizedTag = CandidateNormalizer.normalizeTag(rawTagWithImage);
+    expect(normalizedTag.imageUrl).toBe('https://images.qloo.com/i/tag_1-420x-auto.jpg');
+  });
+
+  it('should leave imageUrl undefined when properties or image.url is missing', () => {
+    const rawEntityNoImage: QlooRawEntity = {
+      entity_id: 'ent_plain',
+      name: 'Plain Entity',
+      types: ['urn:entity:place']
+    };
+
+    const normalized = CandidateNormalizer.normalizeEntity(rawEntityNoImage);
+    expect(normalized.imageUrl).toBeUndefined();
+  });
 });

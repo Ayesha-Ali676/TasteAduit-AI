@@ -13,6 +13,7 @@ export interface NormalizedCandidate {
   category: 'entity' | 'tag';
   popularity?: number;
   disambiguation?: string;
+  imageUrl?: string;
   tags?: string[];
   source: 'qloo';
   retrievedAt: string;
@@ -146,6 +147,7 @@ export interface RepairItemResult {
     name: string;
     entityId: string;
     type?: string;
+    imageUrl?: string;
   };
   reasoning: string;
   beforeAudit: ItemAuditResult;
