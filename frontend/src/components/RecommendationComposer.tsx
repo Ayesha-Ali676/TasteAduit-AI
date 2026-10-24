@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AuditFormData } from '../types/audit';
-import { ArrowRight, Loader2, Sparkles, MapPin, Users, Sliders } from 'lucide-react';
+import { ArrowRight, Loader2, Sparkles, MapPin, Users, Sliders, AlertCircle } from 'lucide-react';
 
 interface RecommendationComposerProps {
   onSubmit: (data: AuditFormData) => void;
@@ -61,17 +61,31 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
   isLoading,
   stagesExecuted = []
 }) => {
-  const [formData, setFormData] = useState<AuditFormData>(SCENARIOS[0].data);
-  const [activeScenarioId, setActiveScenarioId] = useState<string>('venuepulse');
+  // Empty by default on page load — user types their own values
+  const [formData, setFormData] = useState<AuditFormData>({
+    recommendations: '',
+    audienceContext: '',
+    location: '',
+    constraints: '',
+    enableAgent: true
+  });
+  const [activeScenarioId, setActiveScenarioId] = useState<string>('');
+  const [validationError, setValidationError] = useState<string | null>(null);
 
+  // Scenario shortcut populates editable values
   const handleSelectScenario = (sc: Scenario) => {
     setActiveScenarioId(sc.id);
     setFormData({ ...sc.data });
+    setValidationError(null);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.recommendations.trim()) return;
+    if (!formData.recommendations.trim()) {
+      setValidationError('Please enter an AI recommendation to audit.');
+      return;
+    }
+    setValidationError(null);
     onSubmit(formData);
   };
 
@@ -123,25 +137,32 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
               htmlFor="recommendation-input"
               className="text-xs font-bold tracking-wider uppercase text-sage-dark"
             >
-              AI Recommendation
+              AI RECOMMENDATION
             </label>
             <span className="text-xs text-sage-muted">
-              Paste any LLM output to audit
+              Required
             </span>
           </div>
 
           <textarea
             id="recommendation-input"
             rows={3}
-            required
             value={formData.recommendations}
             onChange={(e) => {
               setFormData({ ...formData, recommendations: e.target.value });
               setActiveScenarioId('');
+              if (validationError) setValidationError(null);
             }}
-            placeholder="e.g. Recommend 3 neighborhood coffee shops in Shoreditch, London with artisanal vinyl listening spaces."
+            placeholder="e.g. Recommend 3 movies similar to Pulp Fiction"
             className="w-full bg-[#FAFDF9] border border-sage-mint focus:border-sage focus:ring-2 focus:ring-sage/20 rounded-2xl p-4 sm:p-5 text-base sm:text-lg text-sage-dark placeholder-sage-soft transition leading-relaxed resize-none font-normal outline-none"
           />
+
+          {validationError && (
+            <div className="flex items-center gap-1.5 text-xs text-rose-600 font-medium pt-1">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span>{validationError}</span>
+            </div>
+          )}
         </div>
 
         {/* Context Fields in Clean White/Light-Mint */}
@@ -150,13 +171,16 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
           <div className="p-3 rounded-xl bg-[#FAFDF9] border border-sage-mint focus-within:border-sage focus-within:ring-1 focus-within:ring-sage/30 transition">
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-sage-dark uppercase tracking-wide mb-1">
               <Users className="w-3 h-3 text-sage" />
-              <span>Audience</span>
+              <span>AUDIENCE</span>
             </div>
             <input
               type="text"
               value={formData.audienceContext}
-              onChange={(e) => setFormData({ ...formData, audienceContext: e.target.value })}
-              placeholder="e.g. Creative professionals"
+              onChange={(e) => {
+                setFormData({ ...formData, audienceContext: e.target.value });
+                setActiveScenarioId('');
+              }}
+              placeholder="e.g. Young urban professionals"
               className="w-full bg-transparent text-xs text-sage-dark placeholder-sage-soft outline-none font-medium"
             />
           </div>
@@ -165,13 +189,16 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
           <div className="p-3 rounded-xl bg-[#FAFDF9] border border-sage-mint focus-within:border-sage focus-within:ring-1 focus-within:ring-sage/30 transition">
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-sage-dark uppercase tracking-wide mb-1">
               <MapPin className="w-3 h-3 text-sage" />
-              <span>Location</span>
+              <span>LOCATION</span>
             </div>
             <input
               type="text"
               value={formData.location}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-              placeholder="e.g. Shoreditch, London"
+              onChange={(e) => {
+                setFormData({ ...formData, location: e.target.value });
+                setActiveScenarioId('');
+              }}
+              placeholder="e.g. New York, USA"
               className="w-full bg-transparent text-xs text-sage-dark placeholder-sage-soft outline-none font-medium"
             />
           </div>
@@ -180,13 +207,16 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
           <div className="p-3 rounded-xl bg-[#FAFDF9] border border-sage-mint focus-within:border-sage focus-within:ring-1 focus-within:ring-sage/30 transition">
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-sage-dark uppercase tracking-wide mb-1">
               <Sliders className="w-3 h-3 text-sage" />
-              <span>Constraints</span>
+              <span>CONSTRAINTS</span>
             </div>
             <input
               type="text"
               value={formData.constraints}
-              onChange={(e) => setFormData({ ...formData, constraints: e.target.value })}
-              placeholder="e.g. Vinyl listening · Pour-overs"
+              onChange={(e) => {
+                setFormData({ ...formData, constraints: e.target.value });
+                setActiveScenarioId('');
+              }}
+              placeholder="e.g. Must be a cult classic and suitable for a 90s crime cinema theme"
               className="w-full bg-transparent text-xs text-sage-dark placeholder-sage-soft outline-none font-medium"
             />
           </div>
@@ -196,7 +226,7 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
         <div className="pt-2">
           <button
             type="submit"
-            disabled={isLoading || !formData.recommendations.trim()}
+            disabled={isLoading}
             className="w-full py-4 px-8 rounded-2xl font-bold text-base sm:text-lg text-white bg-sage-dark hover:bg-sage active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed shadow-sage-button transition-all flex items-center justify-center gap-3 cursor-pointer"
           >
             {isLoading ? (
