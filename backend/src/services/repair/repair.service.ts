@@ -80,13 +80,15 @@ export class RepairService {
         .slice(0, 6)
         .forEach((s) => {
           if (s.relatedEntityId && !candidatesMap.has(s.relatedEntityId)) {
+            const candImgUrl = s.imageUrl || (s.relatedEntityId ? `https://images.qloo.com/i/${s.relatedEntityId}-420x-auto.jpg` : undefined);
             candidatesMap.set(s.relatedEntityId, {
               name: s.relatedEntityName || 'Related Entity',
               entityId: s.relatedEntityId,
-              type: 'urn:entity:movie',
+              type: s.relatedEntityType || 'urn:entity:movie',
               category: 'entity',
               affinityValue: s.value,
               tags: s.tags || [],
+              imageUrl: candImgUrl,
               relationship: s.relationship || 'high_taste_affinity'
             });
           }
@@ -270,7 +272,11 @@ Analyze the grounding deficiencies and select the best verified candidate from t
 
     // 3. Dispatch to AI Provider (Groq with OpenRouter fallback)
     const messages = this.buildPrompt(envelope, verifiedCandidates, context);
-    const aiResult = await this.ai.executeCompletion(messages, { jsonMode: true, temperature: 0.1 });
+    const aiResult = await this.ai.executeCompletion(messages, {
+      jsonMode: true,
+      temperature: 0.1,
+      maxTokens: 768
+    });
 
     if (!aiResult.success || !aiResult.content) {
       logger.warn(`[Repair] AI reasoning layer unavailable for "${originalItem}": ${aiResult.error}`);
@@ -385,6 +391,10 @@ Analyze the grounding deficiencies and select the best verified candidate from t
       constraints: context?.constraints
     });
 
+    const candidateImageUrl = matchedVerifiedCandidate.imageUrl ||
+      repairedEvidence.imageUrl ||
+      (matchedVerifiedCandidate.entityId ? `https://images.qloo.com/i/${matchedVerifiedCandidate.entityId}-420x-auto.jpg` : undefined);
+
     const repairedEnvelope: ItemResolutionEnvelope = {
       item: { id: `rep_${Date.now()}`, name: matchedVerifiedCandidate.name },
       resolution: {
@@ -397,7 +407,7 @@ Analyze the grounding deficiencies and select the best verified candidate from t
           category: matchedVerifiedCandidate.category,
           source: 'qloo',
           tags: matchedVerifiedCandidate.tags,
-          imageUrl: matchedVerifiedCandidate.imageUrl,
+          imageUrl: candidateImageUrl,
           retrievedAt: new Date().toISOString()
         },
         candidates: [],
@@ -425,7 +435,7 @@ Analyze the grounding deficiencies and select the best verified candidate from t
       name: matchedVerifiedCandidate.name,
       entityId: matchedVerifiedCandidate.entityId,
       type: matchedVerifiedCandidate.type,
-      imageUrl: matchedVerifiedCandidate.imageUrl
+      imageUrl: candidateImageUrl
     };
 
     logger.info(

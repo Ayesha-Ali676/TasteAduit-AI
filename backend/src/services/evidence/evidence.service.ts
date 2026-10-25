@@ -83,6 +83,10 @@ export class EvidenceRetrievalService {
       insightsResult.value.forEach((item, index) => {
         const affinityVal = typeof item.query?.affinity === 'number' ? item.query.affinity : undefined;
         const tagNames = item.tags ? item.tags.map((t) => t.name).filter(Boolean).slice(0, 4) : [];
+        const rawItemImg = item.properties?.image as { url?: string } | undefined;
+        const signalImgUrl = typeof rawItemImg?.url === 'string' && rawItemImg.url.trim().length > 0
+          ? rawItemImg.url.trim()
+          : (item.entity_id ? `https://images.qloo.com/i/${item.entity_id}-420x-auto.jpg` : undefined);
 
         signals.push({
           signalType: 'taste_affinity',
@@ -92,6 +96,7 @@ export class EvidenceRetrievalService {
           value: affinityVal, // Empirical Qloo affinity; never fabricated
           rank: index + 1,
           relationship: 'high_taste_affinity',
+          imageUrl: signalImgUrl,
           context: {
             audience: input.audience,
             location: input.location
@@ -104,8 +109,16 @@ export class EvidenceRetrievalService {
     }
 
     // Process /entities signals (Direct cultural attributes and tags)
+    let entityImageUrl: string | undefined;
     if (detailsResult.status === 'fulfilled' && detailsResult.value) {
       const details = detailsResult.value;
+      const rawImg = details.properties?.image as { url?: string } | undefined;
+      if (typeof rawImg?.url === 'string' && rawImg.url.trim().length > 0) {
+        entityImageUrl = rawImg.url.trim();
+      } else if (input.entityId && !input.entityId.startsWith('urn:tag:')) {
+        entityImageUrl = `https://images.qloo.com/i/${input.entityId}-420x-auto.jpg`;
+      }
+
       if (details.tags && Array.isArray(details.tags)) {
         details.tags.slice(0, 5).forEach((t) => {
           signals.push({
@@ -126,6 +139,7 @@ export class EvidenceRetrievalService {
         entityId: input.entityId,
         entityName: input.entityName,
         entityType: input.entityType,
+        imageUrl: entityImageUrl,
         signals: [],
         summary: {
           signalsCount: 0,
@@ -160,6 +174,7 @@ export class EvidenceRetrievalService {
       entityId: input.entityId,
       entityName: input.entityName,
       entityType: input.entityType,
+      imageUrl: entityImageUrl,
       signals,
       summary: {
         signalsCount: signals.length,

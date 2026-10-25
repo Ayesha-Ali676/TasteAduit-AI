@@ -6,10 +6,10 @@ import { z } from 'zod';
  */
 export const AgentDecisionSchema = z.object({
   decision: z.enum(['ACCEPT', 'REPAIR', 'MORE_EVIDENCE', 'STOP']),
-  targetItemId: z.string().optional(),
-  suggestedCandidateId: z.string().optional(),
+  targetItemId: z.string().nullable().optional(),
+  suggestedCandidateId: z.string().nullable().optional(),
   reasoning: z.string().min(1, 'Reasoning explanation cannot be empty'),
-  stopReason: z.string().optional()
+  stopReason: z.string().nullable().optional()
 });
 
 export type AgentDecisionPayload = z.infer<typeof AgentDecisionSchema>;

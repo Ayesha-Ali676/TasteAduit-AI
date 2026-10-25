@@ -54,7 +54,7 @@ export class OpenRouterProvider implements AIProvider {
           model: this.model,
           messages,
           temperature: options?.temperature ?? 0.2,
-          max_tokens: options?.maxTokens ?? 1024,
+          max_tokens: options?.maxTokens ?? 768,
           ...(options?.jsonMode ? { response_format: { type: 'json_object' } } : {})
         }),
         signal: controller.signal
@@ -64,13 +64,21 @@ export class OpenRouterProvider implements AIProvider {
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
+        const isPaymentRequired = response.status === 402;
+        const isRateLimit = response.status === 429;
+        let reasonDesc = `OpenRouter API responded with HTTP ${response.status}`;
+        if (isPaymentRequired) {
+          reasonDesc = 'OpenRouter insufficient credits (HTTP 402)';
+        } else if (isRateLimit) {
+          reasonDesc = 'OpenRouter rate limit exceeded (HTTP 429)';
+        }
         logger.warn(`[OpenRouter] API request failed with status ${response.status}: ${errorText.slice(0, 200)}`);
         return {
           success: false,
           provider: 'openrouter',
           model: this.model,
           statusCode: response.status,
-          error: `OpenRouter API responded with HTTP ${response.status}`,
+          error: reasonDesc,
           latencyMs
         };
       }

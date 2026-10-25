@@ -29,10 +29,13 @@ export class AIOrchestratorProvider {
     messages: ChatMessage[],
     options?: AICallOptions
   ): Promise<AICompletionResult> {
+    let primaryResult: AICompletionResult | undefined;
+    let fallbackResult: AICompletionResult | undefined;
+
     // 1. Try Primary Provider (Groq) if configured
     if (this.primary.isConfigured()) {
       logger.info(`[AI] Dispatching request to primary provider (${this.primary.name})...`);
-      const primaryResult = await this.primary.generateCompletion(messages, options);
+      primaryResult = await this.primary.generateCompletion(messages, options);
 
       if (primaryResult.success && primaryResult.content) {
         return primaryResult;
@@ -48,7 +51,7 @@ export class AIOrchestratorProvider {
     // 2. Try Fallback Provider (OpenRouter) if configured
     if (this.fallback.isConfigured()) {
       logger.info(`[AI] Activating fallback provider (${this.fallback.name})...`);
-      const fallbackResult = await this.fallback.generateCompletion(messages, options);
+      fallbackResult = await this.fallback.generateCompletion(messages, options);
 
       if (fallbackResult.success && fallbackResult.content) {
         return fallbackResult;
@@ -60,11 +63,19 @@ export class AIOrchestratorProvider {
     }
 
     // 3. Both providers failed or neither is configured
+    const failureDetails = [
+      primaryResult?.error,
+      fallbackResult?.error
+    ].filter(Boolean).join('; ');
+
     return {
       success: false,
-      provider: 'groq',
-      model: 'none',
-      error: 'AI_REPAIR_UNAVAILABLE: All AI providers failed or are unconfigured.'
+      provider: fallbackResult?.provider ?? primaryResult?.provider ?? 'groq',
+      model: fallbackResult?.model ?? primaryResult?.model ?? 'none',
+      statusCode: fallbackResult?.statusCode ?? primaryResult?.statusCode,
+      error: failureDetails
+        ? `AI_REPAIR_UNAVAILABLE: ${failureDetails}`
+        : 'AI_REPAIR_UNAVAILABLE: All AI providers failed or are unconfigured.'
     };
   }
 }

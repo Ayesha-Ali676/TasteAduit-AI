@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AuditResponse, ItemResolutionEnvelope } from '../types/audit';
 import {
   ArrowRight,
@@ -12,8 +12,10 @@ import {
   Sparkles,
   TrendingUp,
   Sliders,
-  Check
+  Check,
+  ZoomIn
 } from 'lucide-react';
+import { ImageLightboxModal } from './ImageLightboxModal';
 
 interface AuditResultsViewProps {
   response: AuditResponse;
@@ -31,6 +33,43 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
   const agentTrace = response.agentTrace;
   const items = response.items || [];
   const rawRecommendation = response.input.rawRecommendation;
+
+  // Lightbox modal state for large Qloo visual experience
+  const [lightboxData, setLightboxData] = useState<{
+    isOpen: boolean;
+    imageUrl?: string;
+    entityName: string;
+    category?: string;
+  }>({
+    isOpen: false,
+    entityName: '',
+  });
+
+  const openLightbox = (imageUrl: string, entityName: string, category?: string) => {
+    setLightboxData({
+      isOpen: true,
+      imageUrl,
+      entityName,
+      category,
+    });
+  };
+
+  const closeLightbox = () => {
+    setLightboxData((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  const getTopVerifiedTags = (envelope?: ItemResolutionEnvelope, limit = 4): string[] => {
+    if (!envelope) return [];
+    const entityTags = envelope.resolution.resolvedEntity?.tags || [];
+    if (entityTags.length > 0) return entityTags.slice(0, limit);
+
+    const signalTags = envelope.evidence?.signals
+      ?.filter(s => s.signalType === 'cultural_tag' || s.signalType === 'taste_affinity')
+      ?.map(s => s.relatedEntityName || '')
+      ?.filter(Boolean) || [];
+
+    return Array.from(new Set(signalTags)).slice(0, limit);
+  };
 
   // Determine scores strictly from backend response
   const initialScore = repairReport
@@ -51,15 +90,28 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
   };
 
   const repairedItems = repairReport?.repairedItems || [];
+  const hasAttemptedRepair = repairedItems.length > 0 && repairedItems.some(r => !!r.selectedCandidate);
+  const hasSuccessfulRepair = repairedItems.length > 0 && scoreDelta > 0 && repairedItems.some(r => r.verifiedImprovement || (r.scoreDelta ?? 0) > 0);
+  const isZeroImprovementRepair = hasAttemptedRepair && scoreDelta <= 0;
+  const isCulturallyVerified =
+    (agentTrace?.terminalState === 'ACCEPTED' || auditReport?.decision.status === 'supported') &&
+    finalScore >= 70;
 
-  // Human-friendly status derived deterministically from final score
+  // Human-friendly status derived deterministically from final score & agent loop outcome
   const getScoreStatus = (score: number) => {
-    if (score >= 80) {
+    if (isZeroImprovementRepair) {
+      return {
+        label: score >= 60 ? 'Partially Grounded — No Improvement' : 'Needs Grounding — No Improvement',
+        badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
+        dotClass: 'bg-amber-500',
+        explanation: 'Repair attempted, but deterministic re-audit found no improvement. The Agent stopped safely.'
+      };
+    } else if (hasSuccessfulRepair || (score >= 80 && agentTrace?.terminalState === 'ACCEPTED')) {
       return {
         label: 'Strong Cultural Fit',
         badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
         dotClass: 'bg-emerald-500',
-        explanation: 'Most recommendations are supported by verified cultural evidence in the Qloo taste graph.'
+        explanation: 'Recommendations are supported by verified cultural evidence in the Qloo taste graph.'
       };
     } else if (score >= 60) {
       return {
@@ -70,7 +122,7 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
       };
     } else {
       return {
-        label: 'Needs Grounding',
+        label: agentTrace?.terminalState === 'STOPPED' ? 'Insufficient Evidence' : 'Needs Grounding',
         badgeClass: 'bg-rose-50 text-rose-800 border-rose-200',
         dotClass: 'bg-rose-500',
         explanation: auditReport?.decision.explanation ||
@@ -166,13 +218,18 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
             </div>
 
             {/* Score Delta if repair occurred */}
-            {scoreDelta > 0 && (
+            {scoreDelta > 0 ? (
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-sage-mint/80 border border-sage-soft text-sage-dark text-xs font-bold shadow-xs">
                 <TrendingUp className="w-3.5 h-3.5 text-sage" />
                 <span>+{scoreDelta} improvement after repair</span>
                 <span className="text-sage-muted font-normal">({initialScore} → {finalScore})</span>
               </div>
-            )}
+            ) : isZeroImprovementRepair ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold shadow-xs">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                <span>{initialScore} → {finalScore} (No improvement)</span>
+              </div>
+            ) : null}
 
             <p className="text-sm text-sage-dark leading-relaxed font-normal pt-1">
               {statusInfo.explanation}
@@ -261,7 +318,11 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
             Before &amp; After Cultural Grounding
           </h2>
           <span className="text-xs text-sage-muted">
-            {repairedItems.length > 0 ? `${repairedItems.length} verified candidate repairs` : 'Verified against Qloo Graph'}
+            {hasSuccessfulRepair
+              ? `${repairedItems.filter(r => (r.scoreDelta ?? 0) > 0).length} successful repair${repairedItems.length > 1 ? 's' : ''}`
+              : isZeroImprovementRepair
+              ? 'Repair attempted — no improvement'
+              : 'Verified against Qloo Graph'}
           </span>
         </div>
 
@@ -296,19 +357,29 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                     const failedReasons = reasons.filter(r => r.includes('[FAIL]') || r.includes('[UNVERIFIED]'));
 
                     const classification = audit?.provenance.classification || env.resolution.provenance.classification;
+                    const imageUrl = env.resolution.resolvedEntity?.imageUrl;
 
                     return (
                       <div key={idx} className="p-3.5 rounded-xl bg-[#FAFDF9] border border-sage-mint text-xs flex items-start gap-3">
-                        {env.resolution.resolvedEntity?.imageUrl && (
-                          <img
-                            src={env.resolution.resolvedEntity.imageUrl}
-                            alt={env.item.name}
-                            loading="lazy"
-                            onError={(e) => {
-                              (e.currentTarget as HTMLElement).style.display = 'none';
-                            }}
-                            className="w-12 h-12 rounded-lg object-cover border border-sage-mint shrink-0 shadow-xs"
-                          />
+                        {imageUrl && (
+                          <div
+                            className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border border-sage-mint bg-sage-soft/20 shadow-xs shrink-0 cursor-pointer group"
+                            onClick={() => openLightbox(imageUrl, env.item.name, env.resolution.resolvedEntity?.type)}
+                            title="Click to enlarge image"
+                          >
+                            <img
+                              src={imageUrl}
+                              alt={env.item.name}
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = 'none';
+                              }}
+                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <ZoomIn className="w-4 h-4 text-white" />
+                            </div>
+                          </div>
                         )}
                         <div className="flex-1 space-y-1 min-w-0">
                           <div className="font-bold text-sage-dark flex items-center justify-between">
@@ -342,29 +413,49 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
             </p>
           </div>
 
-          {/* QLOO-GROUNDED RESULT (AFTER) */}
-          <div className="rounded-3xl bg-[#EAF4EB] border-2 border-sage-soft p-6 sm:p-7 flex flex-col justify-between space-y-5 shadow-sage-soft relative overflow-hidden">
+          {/* RIGHT-HAND RESULT CARD (AFTER / VERIFIED STATE) */}
+          <div className={`rounded-3xl border-2 p-6 sm:p-7 flex flex-col justify-between space-y-5 shadow-sage-soft relative overflow-hidden ${
+            hasSuccessfulRepair || (isCulturallyVerified && !isZeroImprovementRepair)
+              ? 'bg-[#EAF4EB] border-sage-soft'
+              : 'bg-[#FAFDF9] border-amber-200/80'
+          }`}>
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-sage-soft/70">
                 <span className="text-xs font-bold uppercase tracking-wider text-sage-dark flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-sage" />
-                  Qloo-Grounded Result
+                  {hasSuccessfulRepair || (isCulturallyVerified && !isZeroImprovementRepair) ? (
+                    <CheckCircle2 className="w-4 h-4 text-sage" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  )}
+                  {hasSuccessfulRepair
+                    ? 'Qloo-Grounded Result'
+                    : isZeroImprovementRepair
+                    ? 'Partially Grounded — No Improvement'
+                    : isCulturallyVerified
+                    ? 'Culturally Grounded Result'
+                    : agentTrace?.terminalState === 'STOPPED'
+                    ? 'Audit Outcome: Stopped Safely'
+                    : 'Audit Outcome: Insufficient Evidence'}
                 </span>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-sage-dark">
                     {finalScore} / 100
                   </span>
-                  {scoreDelta > 0 && (
+                  {scoreDelta > 0 ? (
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-sage-dark text-white">
                       +{scoreDelta}
                     </span>
-                  )}
+                  ) : isZeroImprovementRepair ? (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                      No improvement
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
               {/* Repaired Entities or Verified Status */}
               {repairedItems.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {repairedItems.map((rep, idx) => {
                     const cand = rep.selectedCandidate;
                     const afterItemScore = rep.afterAudit?.overallScore ?? rep.beforeAudit.overallScore;
@@ -374,25 +465,38 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                     );
 
                     const itemImageUrl = cand?.imageUrl || relatedEnv?.resolution.resolvedEntity?.imageUrl;
+                    const topTags = relatedEnv ? getTopVerifiedTags(relatedEnv, 4) : [];
 
                     return (
-                      <div key={idx} className="p-4 rounded-xl bg-white border border-sage-soft space-y-2.5 shadow-xs">
-                        <div className="flex items-start gap-3">
+                      <div key={idx} className="p-4 sm:p-5 rounded-2xl bg-white border border-sage-soft space-y-3.5 shadow-xs">
+                        <div className="flex flex-col sm:flex-row items-start gap-4">
                           {itemImageUrl && (
-                            <img
-                              src={itemImageUrl}
-                              alt={cand?.name || rep.originalItem}
-                              loading="lazy"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLElement).style.display = 'none';
-                              }}
-                              className="w-12 h-12 rounded-lg object-cover border border-sage-soft shrink-0 shadow-xs"
-                            />
+                            <div
+                              className="relative w-full sm:w-36 h-36 rounded-xl overflow-hidden border border-sage-soft bg-sage-soft/20 shadow-xs shrink-0 cursor-pointer group"
+                              onClick={() => openLightbox(itemImageUrl, cand?.name || rep.originalItem, cand?.type)}
+                              title="Click to enlarge image"
+                            >
+                              <img
+                                src={itemImageUrl}
+                                alt={cand?.name || rep.originalItem}
+                                loading="lazy"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLElement).style.display = 'none';
+                                }}
+                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white/90 text-sage-dark shadow-sm">
+                                  <ZoomIn className="w-3 h-3 text-sage" /> Enlarge
+                                </span>
+                              </div>
+                            </div>
                           )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between">
+
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 text-xs sm:text-sm">
-                                <span className="text-sage-muted line-through truncate max-w-[110px]">
+                                <span className="text-sage-muted line-through truncate max-w-[120px]">
                                   {rep.originalItem}
                                 </span>
                                 <ArrowRight className="w-3.5 h-3.5 text-sage shrink-0" />
@@ -400,49 +504,195 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                                   {cand?.name || rep.originalItem}
                                 </strong>
                               </div>
-                              <span className="text-xs font-bold text-sage-dark bg-sage-mint px-2 py-0.5 rounded shrink-0">
-                                {afterItemScore}/100
+                              <span className="text-xs font-bold text-sage-dark bg-sage-mint px-2.5 py-0.5 rounded-full shrink-0 border border-sage-soft">
+                                {rep.beforeAudit.overallScore} → {afterItemScore}/100
                               </span>
                             </div>
-                            <p className="text-xs text-sage-dark leading-relaxed italic pt-1">
+
+                            {rep.scoreDelta !== undefined && rep.scoreDelta <= 0 && (
+                              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                                <strong>Repair attempted, but deterministic re-audit found no improvement. The Agent stopped safely.</strong>
+                              </div>
+                            )}
+
+                            <p className="text-xs text-sage-dark leading-relaxed italic">
                               "{rep.reasoning}"
                             </p>
-                          </div>
-                        </div>
 
-                        <div className="pt-2 border-t border-sage-mint flex items-center justify-between text-xs">
-                          <span className="text-[11px] text-sage-muted">
-                            Qloo Entity: <strong className="text-sage-dark">{cand?.name || 'Verified'}</strong>
-                          </span>
-                          {relatedEnv && (
-                            <button
-                              type="button"
-                              onClick={() => onSelectEntityForEvidence(relatedEnv)}
-                              className="text-xs font-bold text-sage-dark hover:text-sage flex items-center gap-1 transition cursor-pointer"
-                            >
-                              <span>View evidence &rarr;</span>
-                            </button>
-                          )}
+                            {/* Verified Qloo Signals */}
+                            {topTags.length > 0 && (
+                              <div className="pt-1 flex flex-wrap gap-1.5">
+                                {topTags.map((t, tIdx) => (
+                                  <span
+                                    key={tIdx}
+                                    className="inline-flex items-center gap-1 text-[11px] font-medium text-sage-dark bg-sage-mint/40 border border-sage-mint px-2 py-0.5 rounded-md"
+                                  >
+                                    <Check className="w-3 h-3 text-emerald-600" />
+                                    {t}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="pt-2 border-t border-sage-mint flex items-center justify-between text-xs">
+                              <span className="text-[11px] text-sage-muted">
+                                Qloo Entity: <strong className="text-sage-dark">{cand?.name || 'Verified'}</strong>
+                              </span>
+                              {relatedEnv && (
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectEntityForEvidence(relatedEnv)}
+                                  className="text-xs font-bold text-sage-dark hover:text-sage flex items-center gap-1 transition cursor-pointer"
+                                >
+                                  <span>View evidence &rarr;</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <div className="p-5 rounded-xl bg-white border border-sage-soft space-y-2 text-xs shadow-xs">
-                  <div className="flex items-center gap-2 text-sage-dark font-bold text-sm">
-                    <Check className="w-4 h-4 text-emerald-600" />
-                    <span>Recommendations Culturally Verified</span>
-                  </div>
-                  <p className="text-sage-dark leading-relaxed">
-                    The requested recommendations exhibit strong alignment with empirical Qloo taste signals without requiring candidate substitution.
-                  </p>
-                </div>
+                (() => {
+                  const verifiedEnv = items.find(
+                    it => it.resolution.status === 'resolved' && it.resolution.resolvedEntity?.imageUrl
+                  );
+                  const verifiedEntity = verifiedEnv?.resolution.resolvedEntity;
+                  const verifiedImageUrl = verifiedEntity?.imageUrl;
+                  const topTags = verifiedEnv ? getTopVerifiedTags(verifiedEnv, 5) : [];
+
+                  return verifiedImageUrl && verifiedEntity ? (
+                    <div className="rounded-2xl bg-white border border-sage-soft overflow-hidden shadow-xs space-y-0">
+                      {/* Large Qloo Visual Hero */}
+                      <div
+                        className="relative w-full h-48 sm:h-56 bg-sage-soft/20 cursor-pointer group overflow-hidden border-b border-sage-soft/70"
+                        onClick={() => openLightbox(verifiedImageUrl, verifiedEntity.name, verifiedEntity.type)}
+                        title="Click to view full size image"
+                      >
+                        <img
+                          src={verifiedImageUrl}
+                          alt={verifiedEntity.name}
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLElement).style.display = 'none';
+                          }}
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3.5">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/90 text-sage-dark shadow-sm">
+                            <ZoomIn className="w-3.5 h-3.5 text-sage" /> Click to enlarge
+                          </span>
+                          <span className="text-[11px] text-white/90 bg-black/40 px-2 py-0.5 rounded-full">
+                            Qloo CDN
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Details */}
+                      <div className="p-5 space-y-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h4 className="text-lg font-bold text-sage-dark tracking-tight">
+                              {verifiedEntity.name}
+                            </h4>
+                            <div className="flex items-center gap-2 pt-0.5 text-xs text-sage-muted">
+                              <span className={`font-semibold px-2.5 py-0.5 rounded-full border ${statusInfo.badgeClass}`}>
+                                {finalScore}/100 &bull; {statusInfo.label}
+                              </span>
+                            </div>
+                          </div>
+
+                          {verifiedEnv && (
+                            <button
+                              type="button"
+                              onClick={() => onSelectEntityForEvidence(verifiedEnv)}
+                              className="inline-flex items-center gap-1 text-xs font-bold text-sage-dark hover:text-sage transition cursor-pointer shrink-0 pt-1"
+                            >
+                              <span>View evidence</span>
+                              <ArrowRight className="w-3.5 h-3.5 text-sage" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Verified Cultural Signals if culturally supported */}
+                        {topTags.length > 0 && isCulturallyVerified && (
+                          <div className="space-y-1.5 pt-1 border-t border-sage-mint/60">
+                            <span className="text-[11px] font-bold text-sage-muted uppercase tracking-wider block">
+                              Verified Cultural Signals (Why this recommendation passed):
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {topTags.map((tag, tIdx) => (
+                                <span
+                                  key={tIdx}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FAFDF9] border border-sage-mint text-xs font-medium text-sage-dark"
+                                >
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Unverified note if not culturally verified */}
+                        {!isCulturallyVerified && (
+                          <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
+                            {agentTrace?.events?.slice().reverse().find(e => e.decision === 'STOP')?.reasoning ||
+                             auditReport?.decision.explanation ||
+                             'Entity recognized in Qloo, but failed cultural constraints or threshold.'}
+                          </p>
+                        )}
+
+                        <div className="pt-2 border-t border-sage-mint/40 flex items-center justify-between text-[11px] text-sage-muted">
+                          <span>Visual reference &bull; Qloo verified metadata</span>
+                          <span className="italic">
+                            {isCulturallyVerified ? 'Grounding verified against taste graph' : 'Cultural baseline preserved'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : isCulturallyVerified ? (
+                    <div className="p-5 rounded-xl bg-white border border-sage-soft space-y-2 text-xs shadow-xs">
+                      <div className="flex items-center gap-2 text-sage-dark font-bold text-sm">
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        <span>Recommendations Culturally Verified</span>
+                      </div>
+                      <p className="text-sage-dark leading-relaxed">
+                        The requested recommendations exhibit strong alignment with empirical Qloo taste signals without requiring candidate substitution.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-5 rounded-xl bg-white border border-amber-200 space-y-3 text-xs shadow-xs">
+                      <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        <span>{agentTrace?.terminalState === 'STOPPED' ? 'Agent Stopped Safely' : 'Insufficient Qloo Evidence'}</span>
+                      </div>
+                      <p className="text-sage-dark leading-relaxed">
+                        {agentTrace?.events?.slice().reverse().find(e => e.decision === 'STOP')?.reasoning ||
+                         auditReport?.decision.explanation ||
+                         'The recommendations could not be confidently validated against available cultural evidence in the Qloo taste graph.'}
+                      </p>
+                      {agentTrace?.finalStopReason && (
+                        <div className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 inline-block">
+                          Stop reason: {agentTrace.finalStopReason}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
               )}
             </div>
 
             <p className="text-xs text-sage-dark font-medium italic pt-1">
-              Evidence-backed alternative anchored to the Qloo taste intelligence graph.
+              {hasSuccessfulRepair
+                ? 'Evidence-backed alternative anchored to the Qloo taste intelligence graph.'
+                : isZeroImprovementRepair
+                ? 'Repair candidate evaluated; deterministic audit preserved baseline score.'
+                : isCulturallyVerified
+                ? 'Empirically supported recommendation aligned with Qloo taste signals.'
+                : 'Cultural baseline preserved without speculative modifications.'}
             </p>
           </div>
         </div>
@@ -609,26 +859,44 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
               res.provenance.classification ||
               'Unverified';
 
+            const imageUrl = res.resolvedEntity?.imageUrl;
+            const topTags = getTopVerifiedTags(envelope, 4);
+
             return (
               <div
                 key={idx}
-                className="p-5 rounded-2xl bg-white border border-sage-mint hover:border-sage-soft transition flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sage-card"
+                className="p-5 sm:p-6 rounded-2xl bg-white border border-sage-mint hover:border-sage-soft transition flex flex-col sm:flex-row sm:items-start justify-between gap-5 shadow-sage-card"
               >
-                <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
-                  {res.resolvedEntity?.imageUrl && (
-                    <img
-                      src={res.resolvedEntity.imageUrl}
-                      alt={item.name}
-                      loading="lazy"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLElement).style.display = 'none';
-                      }}
-                      className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl object-cover border border-sage-mint shrink-0 shadow-xs mt-0.5"
-                    />
+                <div className="flex flex-col sm:flex-row items-start gap-4 flex-1 min-w-0">
+                  {imageUrl && (
+                    <div
+                      className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-2xl overflow-hidden border border-sage-mint bg-sage-soft/20 shadow-xs shrink-0 cursor-pointer group"
+                      onClick={() => openLightbox(imageUrl, item.name, res.resolvedEntity?.type)}
+                      title="Click to enlarge image"
+                    >
+                      <img
+                        src={imageUrl}
+                        alt={item.name}
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = 'none';
+                        }}
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-white/90 text-sage-dark shadow-sm">
+                          <ZoomIn className="w-3 h-3 text-sage" /> Enlarge
+                        </span>
+                      </div>
+                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] font-medium tracking-tight pointer-events-none">
+                        Qloo
+                      </div>
+                    </div>
                   )}
-                  <div className="space-y-1.5 flex-1 min-w-0">
+
+                  <div className="space-y-2 flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-3">
-                      <span className="text-base font-bold text-sage-dark tracking-tight truncate">
+                      <span className="text-base sm:text-lg font-bold text-sage-dark tracking-tight truncate">
                         {item.name}
                       </span>
 
@@ -659,13 +927,32 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                     <p className="text-xs text-sage-muted leading-relaxed">
                       {audit?.decision.explanation || res.reason || 'Audited against Qloo cultural reference signals.'}
                     </p>
+
+                    {/* Top verified Qloo signals */}
+                    {topTags.length > 0 && (
+                      <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                        {topTags.map((tag, tIdx) => (
+                          <span
+                            key={tIdx}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-sage-dark bg-sage-mint/40 border border-sage-mint px-2 py-0.5 rounded-md"
+                          >
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="text-[11px] text-sage-muted flex items-center gap-2 pt-0.5">
+                      <span>Visual reference &bull; Qloo verified metadata</span>
+                    </div>
                   </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => onSelectEntityForEvidence(envelope)}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-sage-dark hover:text-white px-4 py-2 rounded-xl bg-sage-mint/60 hover:bg-sage-dark border border-sage-soft transition shrink-0 cursor-pointer shadow-xs"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-sage-dark hover:text-white px-4 py-2 rounded-xl bg-sage-mint/60 hover:bg-sage-dark border border-sage-soft transition shrink-0 cursor-pointer shadow-xs self-start sm:self-center"
                 >
                   <Search className="w-3.5 h-3.5 text-sage" />
                   <span>View evidence &rarr;</span>
@@ -675,6 +962,15 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
           })}
         </div>
       </section>
+
+      {/* Lightbox Modal */}
+      <ImageLightboxModal
+        isOpen={lightboxData.isOpen}
+        imageUrl={lightboxData.imageUrl}
+        entityName={lightboxData.entityName}
+        category={lightboxData.category}
+        onClose={closeLightbox}
+      />
     </div>
   );
 };

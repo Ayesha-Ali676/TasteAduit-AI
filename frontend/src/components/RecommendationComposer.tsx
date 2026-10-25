@@ -109,8 +109,6 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
                 className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs transition-all cursor-pointer ${
                   isSelected
                     ? 'bg-sage-dark text-white font-bold shadow-sm'
-                    : sc.isFlagship
-                    ? 'bg-sage-mint/80 hover:bg-sage-mint text-sage-dark border border-sage-soft font-semibold shadow-xs'
                     : 'bg-white hover:bg-sage-mint/40 text-sage-dark border border-sage-mint shadow-xs'
                 }`}
               >
@@ -150,7 +148,6 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
             value={formData.recommendations}
             onChange={(e) => {
               setFormData({ ...formData, recommendations: e.target.value });
-              setActiveScenarioId('');
               if (validationError) setValidationError(null);
             }}
             placeholder="e.g. Recommend 3 movies similar to Pulp Fiction"
@@ -178,7 +175,6 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
               value={formData.audienceContext}
               onChange={(e) => {
                 setFormData({ ...formData, audienceContext: e.target.value });
-                setActiveScenarioId('');
               }}
               placeholder="e.g. Young urban professionals"
               className="w-full bg-transparent text-xs text-sage-dark placeholder-sage-soft outline-none font-medium"
@@ -196,7 +192,6 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
               value={formData.location}
               onChange={(e) => {
                 setFormData({ ...formData, location: e.target.value });
-                setActiveScenarioId('');
               }}
               placeholder="e.g. New York, USA"
               className="w-full bg-transparent text-xs text-sage-dark placeholder-sage-soft outline-none font-medium"
@@ -214,7 +209,6 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
               value={formData.constraints}
               onChange={(e) => {
                 setFormData({ ...formData, constraints: e.target.value });
-                setActiveScenarioId('');
               }}
               placeholder="e.g. Must be a cult classic and suitable for a 90s crime cinema theme"
               className="w-full bg-transparent text-xs text-sage-dark placeholder-sage-soft outline-none font-medium"

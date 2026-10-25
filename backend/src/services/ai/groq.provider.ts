@@ -52,7 +52,7 @@ export class GroqProvider implements AIProvider {
           model: this.model,
           messages,
           temperature: options?.temperature ?? 0.2,
-          max_tokens: options?.maxTokens ?? 1024,
+          max_tokens: options?.maxTokens ?? 256,
           ...(options?.jsonMode ? { response_format: { type: 'json_object' } } : {})
         }),
         signal: controller.signal
@@ -62,13 +62,17 @@ export class GroqProvider implements AIProvider {
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
+        const isRateLimit = response.status === 429;
+        const reasonDesc = isRateLimit
+          ? 'Groq rate limit exceeded (HTTP 429)'
+          : `Groq API responded with HTTP ${response.status}`;
         logger.warn(`[Groq] API request failed with status ${response.status}: ${errorText.slice(0, 200)}`);
         return {
           success: false,
           provider: 'groq',
           model: this.model,
           statusCode: response.status,
-          error: `Groq API responded with HTTP ${response.status}`,
+          error: reasonDesc,
           latencyMs
         };
       }

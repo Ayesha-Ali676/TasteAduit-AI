@@ -69,6 +69,7 @@ export class TasteAuditOrchestrator {
 
     for (const item of parsed.items) {
       const resolution = await this.resolutionSvc.resolve(item.name, {
+        categoryHint: item.category,
         location: input.location,
         audience: input.audienceContext,
         constraints: input.constraints

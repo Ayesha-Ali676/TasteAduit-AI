@@ -232,7 +232,13 @@ export class TasteAuditAgentLoop {
         evidenceRefs: []
       });
 
-      const aiResult = await this.ai.executeCompletion(messages, { jsonMode: true, temperature: 0.1 });
+      const remainingMs = Math.max(1000, timeoutMs - (Date.now() - startTime));
+      const aiResult = await this.ai.executeCompletion(messages, {
+        jsonMode: true,
+        temperature: 0.1,
+        maxTokens: 512,
+        timeoutMs: Math.min(8000, remainingMs)
+      });
 
       if (!aiResult.success || !aiResult.content) {
         logger.warn(`[AgentLoop] AI provider completion failed: ${aiResult.error}`);
@@ -469,13 +475,16 @@ export class TasteAuditAgentLoop {
         let scoreDelta = 0;
 
         if (repairRes.status === 'repaired' && repairRes.repairedEnvelope) {
-          // Update envelope with repaired replacement and re-audit
-          const targetIndex = currentEnvelopes.findIndex((e) => e.item.id === targetEnvelope.item.id);
-          if (targetIndex !== -1) {
-            currentEnvelopes[targetIndex] = repairRes.repairedEnvelope;
-          }
           scoreAfter = repairRes.afterAudit ? repairRes.afterAudit.overallScore : scoreBefore;
           scoreDelta = repairRes.scoreDelta ?? (scoreAfter - scoreBefore);
+
+          // Only adopt repaired replacement into currentEnvelopes if score verified an improvement
+          if (scoreDelta > 0) {
+            const targetIndex = currentEnvelopes.findIndex((e) => e.item.id === targetEnvelope.item.id);
+            if (targetIndex !== -1) {
+              currentEnvelopes[targetIndex] = repairRes.repairedEnvelope;
+            }
+          }
         }
 
         // Re-aggregate overall audit report deterministically

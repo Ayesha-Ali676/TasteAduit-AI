@@ -14,6 +14,7 @@ export interface NormalizedEvidenceSignal {
   value?: number; // Exact empirical affinity from Qloo (e.g. 0.945); never fabricated
   rank?: number;
   relationship?: string; // e.g. 'high_taste_affinity', 'shared_cultural_attribute'
+  imageUrl?: string;
   context?: {
     audience?: string;
     location?: string;
@@ -33,6 +34,7 @@ export interface NormalizedEvidenceResult {
   entityId?: string;
   entityName?: string;
   entityType?: string;
+  imageUrl?: string;
   signals: NormalizedEvidenceSignal[];
   summary: {
     signalsCount: number;

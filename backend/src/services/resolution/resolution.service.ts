@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { qlooClient, ServerQlooClient } from '../qloo/qloo.client.js';
+import { CandidateNormalizer } from '../qloo/normalization.js';
 import {
   NormalizedCandidate,
   EntityResolutionContext,
@@ -7,6 +8,17 @@ import {
   ResolutionStatus
 } from '../qloo/qloo.types.js';
 import { logger } from '../../utils/logger.js';
+
+import { isLocationMatch } from './location.normalizer.js';
+import { evaluateTypeCompatibility } from './context.matcher.js';
+
+function normalizeDiacritics(str: string): string {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function stripPluralSuffix(str: string): string {
+  return str.replace(/\b([a-z]{3,})s\b/g, '$1');
+}
 
 interface ScoredCandidate {
   candidate: NormalizedCandidate;
@@ -32,68 +44,68 @@ export class EntityResolutionService {
     normalizedQuery: string,
     context?: EntityResolutionContext
   ): ScoredCandidate {
-    const candidateName = candidate.name.toLowerCase().trim();
+    const cNameRaw = candidate.name.toLowerCase().trim();
+    const qRaw = normalizedQuery.trim();
+
+    const cClean = normalizeDiacritics(candidate.name);
+    const qClean = normalizeDiacritics(normalizedQuery);
+
+    const cStemmed = stripPluralSuffix(cClean);
+    const qStemmed = stripPluralSuffix(qClean);
+
     let derivedScore = 0;
     let nameMatch = false;
     let typeMatch = false;
     let locationMatch = false;
 
     // 1. Name Match Component (Weight: 0.50)
-    if (candidateName === normalizedQuery) {
+    if (cNameRaw === qRaw || cClean === qClean) {
       derivedScore += 0.50;
       nameMatch = true;
-    } else if (candidateName.replace(/[^\w\s]/g, '') === normalizedQuery.replace(/[^\w\s]/g, '')) {
+    } else if (cStemmed === qStemmed || cClean.replace(/[^\w\s]/g, '') === qClean.replace(/[^\w\s]/g, '')) {
+      derivedScore += 0.48;
+      nameMatch = true;
+    } else if (cStemmed.replace(/[^\w\s]/g, '') === qStemmed.replace(/[^\w\s]/g, '')) {
       derivedScore += 0.45;
       nameMatch = true;
-    } else if (candidateName.startsWith(normalizedQuery) || normalizedQuery.startsWith(candidateName)) {
-      derivedScore += 0.35;
-    } else if (candidateName.includes(normalizedQuery) || normalizedQuery.includes(candidateName)) {
-      derivedScore += 0.25;
+    } else {
+      // Check prefix and base name (e.g., "Ozone Coffee - Shoreditch" vs "Ozone Coffee Roasters")
+      const baseCandidate = cStemmed.split(/\s*[-–—(:]\s*/)[0].trim();
+      const baseQuery = qStemmed.split(/\s*[-–—(:]\s*/)[0].trim();
+
+      if (baseCandidate === baseQuery && baseQuery.length > 2) {
+        derivedScore += 0.40;
+        nameMatch = true;
+      } else if (
+        cStemmed.startsWith(qStemmed) ||
+        qStemmed.startsWith(cStemmed) ||
+        (baseCandidate.length > 2 && (baseCandidate.startsWith(baseQuery) || baseQuery.startsWith(baseCandidate)))
+      ) {
+        derivedScore += 0.35;
+      } else if (cStemmed.includes(qStemmed) || qStemmed.includes(cStemmed)) {
+        derivedScore += 0.25;
+      }
     }
 
     // 2. Category / Type Compatibility (Weight: 0.30)
-    const hint = context?.categoryHint?.toLowerCase().trim();
-    if (hint) {
-      const typeLower = candidate.type.toLowerCase();
-      if (
-        typeLower.includes(hint) ||
-        (hint === 'music' && (typeLower.includes('artist') || typeLower.includes('genre:music') || typeLower.includes('album'))) ||
-        (hint === 'artist' && typeLower.includes('artist')) ||
-        (hint === 'movie' && (typeLower.includes('movie') || typeLower.includes('film')))
-      ) {
-        derivedScore += 0.30;
-        typeMatch = true;
-      } else if (candidate.tags?.some((t) => t.toLowerCase().includes(hint))) {
-        derivedScore += 0.20;
-        typeMatch = true;
-      }
-    } else {
-      // Baseline type credit when type is well-formed
-      if (candidate.type.startsWith('urn:entity:') || candidate.type.startsWith('urn:tag:')) {
-        derivedScore += 0.15;
-      }
-    }
+    const typeEval = evaluateTypeCompatibility(candidate, context);
+    derivedScore += typeEval.scoreBonus;
+    typeMatch = typeEval.isCompatible;
 
     // 3. Location / Context Compatibility (Weight: 0.15)
-    const location = context?.location?.toLowerCase().trim();
-    if (location) {
-      const disambiguation = (candidate.disambiguation || '').toLowerCase();
-      const tagsString = (candidate.tags || []).join(' ').toLowerCase();
-
-      if (disambiguation.includes(location) || tagsString.includes(location) || candidateName.includes(location)) {
-        derivedScore += 0.15;
-        locationMatch = true;
-      }
+    if (context?.location && isLocationMatch(candidate, context.location)) {
+      derivedScore += 0.15;
+      locationMatch = true;
     }
 
-    // 4. Qloo Popularity Signal (Weight: 0.05 bonus)
-    if (typeof candidate.popularity === 'number' && candidate.popularity > 0.8) {
-      derivedScore += 0.05;
+    // 4. Qloo Popularity Signal (Continuous weight: up to 0.05 bonus)
+    if (typeof candidate.popularity === 'number' && candidate.popularity > 0) {
+      derivedScore += Math.min(0.05, candidate.popularity * 0.05);
     }
 
     return {
       candidate,
-      derivedScore: Math.min(1.0, Math.round(derivedScore * 100) / 100),
+      derivedScore: Math.min(1.0, Math.round(derivedScore * 10000) / 10000),
       nameMatch,
       typeMatch,
       locationMatch
@@ -135,7 +147,14 @@ export class EntityResolutionService {
 
     // Retrieve candidates from server-side Qloo client
     logger.info(`Resolving concept "${trimmedQuery}" with Qloo Hackathon API...`);
-    const rawCandidates = await this.client.searchCandidates(trimmedQuery, { take: 10 });
+    let rawCandidates = await this.client.searchCandidates(trimmedQuery, { take: 10 });
+
+    // If query contains diacritics, accents, or plurals, also query normalized form to maximize Qloo candidate recall
+    const normalizedSearch = stripPluralSuffix(normalizeDiacritics(trimmedQuery));
+    if (normalizedSearch !== trimmedQuery.toLowerCase() && normalizedSearch.length >= 3) {
+      const extraCandidates = await this.client.searchCandidates(normalizedSearch, { take: 10 }).catch(() => []);
+      rawCandidates = CandidateNormalizer.deduplicate([...rawCandidates, ...extraCandidates]);
+    }
 
     if (rawCandidates.length === 0) {
       return {
@@ -165,12 +184,19 @@ export class EntityResolutionService {
     const second = scored[1];
 
     // Evaluate Ambiguity
-    const isCloseMargin = second && (top.derivedScore - second.derivedScore) < 0.15;
+    // Candidates are ambiguous only if they represent distinct cultural domains (e.g. movie vs album vs book)
+    const isDistinctType = second && top.candidate.type !== second.candidate.type;
+    const isCloseMargin = second && (top.derivedScore - second.derivedScore) < 0.10;
     const bothHaveExactName = second && top.nameMatch && second.nameMatch;
-    // Context differentiates candidates when top matches user category and second does not
-    const contextResolved = top.typeMatch && second && !second.typeMatch;
+    // Context differentiates candidates when top matches user category or location and second does not
+    const contextResolved = Boolean(
+      second && (
+        (top.typeMatch && !second.typeMatch) ||
+        (top.locationMatch && !second.locationMatch)
+      )
+    );
 
-    if (bothHaveExactName && isCloseMargin && !contextResolved) {
+    if (bothHaveExactName && isCloseMargin && isDistinctType && !contextResolved) {
       // Multiple candidates share the same name across distinct types without differentiating context
       const candidateTypes = Array.from(new Set(scored.slice(0, 4).map((s) => s.candidate.type))).join(', ');
       return {
@@ -195,8 +221,10 @@ export class EntityResolutionService {
       };
     }
 
+    const isSameType = Boolean(second && top.candidate.type === second.candidate.type);
+
     // Top candidate has clear lead and meets threshold
-    if (top.derivedScore >= 0.50 && (!second || (top.derivedScore - second.derivedScore) >= 0.10 || contextResolved)) {
+    if (top.derivedScore >= 0.50 && (!second || (top.derivedScore - second.derivedScore) >= 0.10 || contextResolved || isSameType)) {
       return {
         query: trimmedQuery,
         status: 'resolved',

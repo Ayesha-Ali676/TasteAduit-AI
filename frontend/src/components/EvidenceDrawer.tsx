@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ItemResolutionEnvelope } from '../types/audit';
-import { X, ShieldCheck, Database, Radio, Sparkles, CheckCircle2, AlertTriangle, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, ShieldCheck, Database, Radio, Sparkles, CheckCircle2, AlertTriangle, HelpCircle, ChevronDown, ChevronUp, ZoomIn } from 'lucide-react';
+import { ImageLightboxModal } from './ImageLightboxModal';
 
 interface EvidenceDrawerProps {
   envelope: ItemResolutionEnvelope | null;
@@ -12,6 +13,7 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
   onClose,
 }) => {
   const [showAllTags, setShowAllTags] = useState<boolean>(false);
+  const [showLightbox, setShowLightbox] = useState<boolean>(false);
 
   if (!envelope) return null;
 
@@ -121,15 +123,24 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
               <div className="p-4 rounded-2xl bg-white border border-sage-mint space-y-2.5 text-xs shadow-xs">
                 {resolvedEntity.imageUrl && (
                   <div className="flex items-center gap-3 pb-3 border-b border-sage-mint">
-                    <img
-                      src={resolvedEntity.imageUrl}
-                      alt={resolvedEntity.name}
-                      className="w-14 h-14 object-cover rounded-xl border border-sage-mint shadow-xs bg-sage-soft/30 shrink-0"
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
-                      loading="lazy"
-                    />
+                    <div
+                      className="relative w-14 h-14 rounded-xl overflow-hidden border border-sage-mint shadow-xs bg-sage-soft/30 shrink-0 cursor-pointer group"
+                      onClick={() => setShowLightbox(true)}
+                      title="Click to view full image"
+                    >
+                      <img
+                        src={resolvedEntity.imageUrl}
+                        alt={resolvedEntity.name}
+                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = 'none';
+                        }}
+                        loading="lazy"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <ZoomIn className="w-4 h-4 text-white" />
+                      </div>
+                    </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-[11px] font-bold text-sage-dark truncate">{resolvedEntity.name}</div>
                       <div className="text-[10px] text-sage-muted flex items-center gap-1 mt-0.5">
@@ -299,6 +310,16 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
           </button>
         </div>
       </div>
+
+      {resolvedEntity && (
+        <ImageLightboxModal
+          isOpen={showLightbox}
+          imageUrl={resolvedEntity.imageUrl}
+          entityName={resolvedEntity.name}
+          category={resolvedEntity.type}
+          onClose={() => setShowLightbox(false)}
+        />
+      )}
     </div>
   );
 };

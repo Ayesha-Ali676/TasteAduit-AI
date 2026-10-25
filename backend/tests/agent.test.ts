@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TasteAuditAgentLoop } from '../src/services/agent/agent.loop.js';
+import { AgentDecisionSchema } from '../src/services/agent/agent.schemas.js';
 import { TasteAuditOrchestrator } from '../src/services/orchestrator/orchestrator.service.js';
 import { AIOrchestratorProvider } from '../src/services/ai/ai.provider.js';
 import { AIProvider, ChatMessage, AICompletionResult, AIRepairCandidate } from '../src/services/ai/ai.types.js';
@@ -867,5 +868,159 @@ describe('Stage 6: Bounded Agent Loop & Orchestration Supervisor', () => {
     expect(result.stagesExecuted).toContain('RE-AUDIT');
     expect(result.agentTrace).toBeDefined();
     expect(result.message).toContain('Stage 6 (AGENT LOOP)');
+  });
+
+  describe('Surgical Fix: Agent Decision Schema & Verification Honesty', () => {
+    it('1. STOP with suggestedCandidateId:null -> VALID', () => {
+      const res = AgentDecisionSchema.safeParse({
+        decision: 'STOP',
+        targetItemId: 'item-1',
+        suggestedCandidateId: null,
+        reasoning: 'No alternatives available',
+        stopReason: 'no_alternatives'
+      });
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.data.suggestedCandidateId).toBeNull();
+      }
+    });
+
+    it('2. STOP with stopReason:null -> VALID', () => {
+      const res = AgentDecisionSchema.safeParse({
+        decision: 'STOP',
+        targetItemId: null,
+        suggestedCandidateId: null,
+        reasoning: 'Bounded stop reached',
+        stopReason: null
+      });
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.data.stopReason).toBeNull();
+      }
+    });
+
+    it('3. malformed decision -> safely rejected', () => {
+      const res = AgentDecisionSchema.safeParse('not an object');
+      expect(res.success).toBe(false);
+
+      const res2 = AgentDecisionSchema.safeParse({
+        decision: 'STOP',
+        reasoning: ''
+      });
+      expect(res2.success).toBe(false);
+    });
+
+    it('4. invalid decision enum -> safely rejected', () => {
+      const res = AgentDecisionSchema.safeParse({
+        decision: 'CONTINUE',
+        reasoning: 'Continue loop'
+      });
+      expect(res.success).toBe(false);
+    });
+
+    it('5. valid ACCEPT -> unchanged', () => {
+      const res = AgentDecisionSchema.safeParse({
+        decision: 'ACCEPT',
+        reasoning: 'All items are culturally grounded'
+      });
+      expect(res.success).toBe(true);
+    });
+
+    it('6. valid REPAIR -> unchanged', () => {
+      const res = AgentDecisionSchema.safeParse({
+        decision: 'REPAIR',
+        targetItemId: 'it_1',
+        suggestedCandidateId: 'cand_123',
+        reasoning: 'Substitute with verified candidate'
+      });
+      expect(res.success).toBe(true);
+    });
+
+    it('7. valid MORE_EVIDENCE -> unchanged', () => {
+      const res = AgentDecisionSchema.safeParse({
+        decision: 'MORE_EVIDENCE',
+        targetItemId: 'it_1',
+        reasoning: 'Ambiguous entity needs more Qloo tags'
+      });
+      expect(res.success).toBe(true);
+    });
+
+    it('8. agent loop executes STOP with suggestedCandidateId:null without invalid_decision_schema error', async () => {
+      const mockAiProvider: AIProvider = {
+        name: 'mock_groq',
+        isConfigured: () => true,
+        generateCompletion: vi.fn().mockResolvedValue({
+          success: true,
+          content: JSON.stringify({
+            decision: 'STOP',
+            targetItemId: 'it_1',
+            suggestedCandidateId: null,
+            reasoning: 'No verified candidate alternatives available for repair.',
+            stopReason: 'insufficient_candidates'
+          }),
+          model: 'qwen/qwen3.8-27b'
+        })
+      };
+
+      const aiOrchestrator = new AIOrchestratorProvider({ primaryProvider: mockAiProvider });
+      const envelope = createMockEnvelope();
+      const mockAuditEngine = {
+        auditItem: vi.fn().mockReturnValue(createMockAuditResult({ overallScore: 35 })),
+        aggregateReport: vi.fn().mockReturnValue(createMockOverallReport(35, 'unverified'))
+      } as unknown as CulturalGroundingAuditEngine;
+
+      const agentLoop = new TasteAuditAgentLoop({
+        ai: aiOrchestrator,
+        repairSvc: createDefaultMockRepairSvc(),
+        evidenceSvc: { retrieveEvidence: vi.fn() } as unknown as EvidenceRetrievalService,
+        auditEngine: mockAuditEngine
+      });
+
+      const result = await agentLoop.runLoop(defaultInput, [envelope], createMockOverallReport(35, 'unverified'), { maxIterations: 3 });
+
+      expect(result.trace.terminalState).toBe('STOPPED');
+      expect(result.trace.finalStopReason).toBe('insufficient_candidates');
+      expect(result.trace.finalStopReason).not.toBe('invalid_decision_schema');
+      const stopEvent = result.trace.events.find(e => e.state === 'COMPLETED' && e.decision === 'STOP');
+      expect(stopEvent).toBeDefined();
+      expect(stopEvent?.reasoning).toBe('No verified candidate alternatives available for repair.');
+    });
+
+    it('9. unverified + STOPPED state in agent loop preserves unverified baseline without claiming verified', async () => {
+      const mockAiProvider: AIProvider = {
+        name: 'mock_groq',
+        isConfigured: () => true,
+        generateCompletion: vi.fn().mockResolvedValue({
+          success: true,
+          content: JSON.stringify({
+            decision: 'STOP',
+            suggestedCandidateId: null,
+            reasoning: 'Cannot ground input recommendation',
+            stopReason: 'unsupported'
+          })
+        })
+      };
+
+      const aiOrchestrator = new AIOrchestratorProvider({ primaryProvider: mockAiProvider });
+      const envelope = createMockEnvelope();
+      const initialReport = createMockOverallReport(25, 'unverified');
+
+      const agentLoop = new TasteAuditAgentLoop({
+        ai: aiOrchestrator,
+        repairSvc: createDefaultMockRepairSvc(),
+        evidenceSvc: { retrieveEvidence: vi.fn() } as unknown as EvidenceRetrievalService,
+        auditEngine: {
+          auditItem: vi.fn().mockReturnValue(createMockAuditResult({ overallScore: 25 })),
+          aggregateReport: vi.fn().mockReturnValue(initialReport)
+        } as unknown as CulturalGroundingAuditEngine
+      });
+
+      const result = await agentLoop.runLoop(defaultInput, [envelope], initialReport, { maxIterations: 1 });
+
+      expect(result.trace.terminalState).toBe('STOPPED');
+      expect(result.auditReport.overallScore).toBe(25);
+      expect(result.auditReport.decision.status).toBe('unverified');
+      expect(result.repairReport?.repairedItems.length || 0).toBe(0);
+    });
   });
 });
