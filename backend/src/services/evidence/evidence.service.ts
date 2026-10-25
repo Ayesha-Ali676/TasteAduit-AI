@@ -39,12 +39,27 @@ export class EvidenceRetrievalService {
       audience: input.audience || null
     };
 
-    // 1. Check bounded process-local cache first
-    const cacheKey = BoundedMemoryCache.createKey(input.entityId, input.entityType, input.location);
+    // 1. Check bounded process-local cache first (incorporating audience & constraints for full request isolation)
+    const cacheKey = BoundedMemoryCache.createKey(
+      input.entityId,
+      input.entityType,
+      input.location,
+      input.audience,
+      input.constraints
+    );
     const cached = this.cache.get(cacheKey);
     if (cached) {
       logger.info(`Evidence cache hit for entity "${input.entityName}" (${input.entityId})`);
-      return cached;
+      // Return fresh copy with current correlationId, timestamp, and queryMetadata to prevent context leaks
+      return {
+        ...cached,
+        provenance: {
+          ...cached.provenance,
+          correlationId,
+          retrievedAt,
+          queryMetadata
+        }
+      };
     }
 
     // 2. Determine target query parameters for /v2/insights

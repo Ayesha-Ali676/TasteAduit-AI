@@ -119,6 +119,14 @@ export interface EntityResolutionContext {
   location?: string;
   audience?: string;
   constraints?: string[];
+  isDiscovery?: boolean;
+  discoveryIntent?: {
+    domain?: string;
+    category?: string;
+    descriptivePreferences?: string[];
+    cleanQuery?: string;
+    rawRequest?: string;
+  };
 }
 
 export interface EntityResolutionResult {

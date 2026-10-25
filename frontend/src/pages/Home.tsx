@@ -14,29 +14,47 @@ export const Home: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedEnvelope, setSelectedEnvelope] = useState<ItemResolutionEnvelope | null>(null);
 
+  // Monotonic request sequence ID ref to prevent stale response race conditions
+  const activeRequestId = React.useRef<number>(0);
+
   const handleSubmit = async (data: AuditFormData) => {
+    const currentReqId = ++activeRequestId.current;
     setIsLoading(true);
     setErrorMsg(null);
+    setResponse(null); // Reset previous audit result immediately so stale results cannot linger
+    setSelectedEnvelope(null); // Clear evidence drawer data
     try {
       const res = await submitAudit(data);
+      // Ignore response if a newer submission was started while this was in flight
+      if (currentReqId !== activeRequestId.current) {
+        return;
+      }
       setResponse(res);
       setHasSubmitted(true);
       // Smooth scroll to top of results
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
+      if (currentReqId !== activeRequestId.current) {
+        return;
+      }
       setErrorMsg(
         err instanceof Error
           ? err.message
           : 'An unexpected error occurred while communicating with the TasteAudit backend.'
       );
     } finally {
-      setIsLoading(false);
+      if (currentReqId === activeRequestId.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   const handleNewAudit = () => {
+    activeRequestId.current++;
     setHasSubmitted(false);
     setResponse(null);
+    setSelectedEnvelope(null);
+    setErrorMsg(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 

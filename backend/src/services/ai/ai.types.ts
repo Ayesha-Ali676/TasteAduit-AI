@@ -36,6 +36,7 @@ export interface AIRepairCandidate {
   name: string;
   entityId: string;
   type: string;
+  normalizedType?: string;
   category: 'entity' | 'tag';
   affinityValue?: number;
   imageUrl?: string;

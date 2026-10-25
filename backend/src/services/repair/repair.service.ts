@@ -13,6 +13,11 @@ import { ServerQlooClient, qlooClient } from '../qloo/qloo.client.js';
 import { EvidenceRetrievalService, evidenceService } from '../evidence/evidence.service.js';
 import { CulturalGroundingAuditEngine, auditEngine } from '../audit/audit.service.js';
 import { logger } from '../../utils/logger.js';
+import {
+  evaluateCandidateCompatibility,
+  resolveTargetSemanticDomain,
+  getTargetQlooEntityType
+} from '../resolution/context.matcher.js';
 
 export interface RepairServiceDependencies {
   ai?: AIOrchestratorProvider;
@@ -65,6 +70,10 @@ export class RepairService {
     const originalNameLower = envelope.item.name.toLowerCase().trim();
     const originalId = envelope.resolution.resolvedEntity?.id;
 
+    // Resolve target semantic domain and preferred Qloo type
+    const targetDomain = resolveTargetSemanticDomain(envelope, context);
+    const targetQlooType = getTargetQlooEntityType(targetDomain);
+
     // 1. Extract high-affinity related entities from Stage 3 Qloo evidence
     if (envelope.evidence && envelope.evidence.signals.length > 0) {
       envelope.evidence.signals
@@ -77,14 +86,33 @@ export class RepairService {
             s.relatedEntityName.toLowerCase().trim() !== originalNameLower
         )
         .sort((a, b) => (b.value || 0) - (a.value || 0))
-        .slice(0, 6)
         .forEach((s) => {
           if (s.relatedEntityId && !candidatesMap.has(s.relatedEntityId)) {
+            // Candidate Semantic Compatibility Firewall
+            const compatibility = evaluateCandidateCompatibility(
+              envelope,
+              {
+                type: s.relatedEntityType,
+                tags: s.tags || [],
+                category: 'entity',
+                name: s.relatedEntityName
+              },
+              context
+            );
+
+            if (!compatibility.isCompatible) {
+              logger.info(
+                `[Candidate Firewall] Incompatible affinity candidate "${s.relatedEntityName}" (${s.relatedEntityId}) rejected: ${compatibility.reason}`
+              );
+              return;
+            }
+
             const candImgUrl = s.imageUrl || (s.relatedEntityId ? `https://images.qloo.com/i/${s.relatedEntityId}-420x-auto.jpg` : undefined);
             candidatesMap.set(s.relatedEntityId, {
               name: s.relatedEntityName || 'Related Entity',
               entityId: s.relatedEntityId,
-              type: s.relatedEntityType || 'urn:entity:movie',
+              type: s.relatedEntityType || targetQlooType || 'urn:entity:unknown',
+              normalizedType: compatibility.normalizedSemanticType,
               category: 'entity',
               affinityValue: s.value,
               tags: s.tags || [],
@@ -95,7 +123,7 @@ export class RepairService {
         });
     }
 
-    // 2. If fewer than 3 candidates found, search Qloo using audience or constraints
+    // 2. If fewer than 3 compatible candidates found, search Qloo scoped by target type
     if (candidatesMap.size < 3) {
       const searchTerms: string[] = [];
       if (context?.constraints && context.constraints.length > 0) {
@@ -112,7 +140,10 @@ export class RepairService {
       const searchQuery = searchTerms.join(' ').trim() || envelope.item.name;
 
       try {
-        const qlooResults = await this.qloo.searchCandidates(searchQuery, { take: 6 });
+        const qlooResults = await this.qloo.searchCandidates(searchQuery, {
+          type: targetQlooType,
+          take: 6
+        });
         for (const cand of qlooResults) {
           if (
             cand.id &&
@@ -120,10 +151,20 @@ export class RepairService {
             cand.name.toLowerCase().trim() !== originalNameLower &&
             !candidatesMap.has(cand.id)
           ) {
+            // Candidate Semantic Compatibility Firewall
+            const compatibility = evaluateCandidateCompatibility(envelope, cand, context);
+            if (!compatibility.isCompatible) {
+              logger.info(
+                `[Candidate Firewall] Incompatible search candidate "${cand.name}" (${cand.id}) rejected: ${compatibility.reason}`
+              );
+              continue;
+            }
+
             candidatesMap.set(cand.id, {
               name: cand.name,
               entityId: cand.id,
               type: cand.type,
+              normalizedType: compatibility.normalizedSemanticType,
               category: cand.category,
               tags: cand.tags || [],
               imageUrl: cand.imageUrl,
@@ -368,6 +409,23 @@ Analyze the grounding deficiencies and select the best verified candidate from t
         status: 'repair_failed',
         repairStrategy: 'unverified_candidate_hallucination_rejected',
         reasoning: `Evidence Firewall rejected candidate "${selected.name}" (ID: ${selected.entityId}): Entity was not in the backend-supplied verified Qloo candidates list.`,
+        beforeAudit,
+        providerUsed: aiResult.provider,
+        evidenceRefs: [],
+        constraintHandling: []
+      };
+    }
+
+    const compatibilityCheck = evaluateCandidateCompatibility(envelope, matchedVerifiedCandidate, context);
+    if (!compatibilityCheck.isCompatible) {
+      logger.warn(
+        `[Evidence Firewall Violation] AI selected semantically incompatible candidate "${matchedVerifiedCandidate.name}" (ID: ${matchedVerifiedCandidate.entityId}): ${compatibilityCheck.reason}`
+      );
+      return {
+        originalItem,
+        status: 'repair_failed',
+        repairStrategy: 'incompatible_semantic_type',
+        reasoning: `Evidence Firewall rejected candidate "${matchedVerifiedCandidate.name}" (ID: ${matchedVerifiedCandidate.entityId}): ${compatibilityCheck.reason}`,
         beforeAudit,
         providerUsed: aiResult.provider,
         evidenceRefs: [],

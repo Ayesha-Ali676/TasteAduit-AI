@@ -25,13 +25,30 @@ export class BoundedMemoryCache<T> {
   }
 
   /**
-   * Generates a deterministic, secret-free cache key.
+   * Generates a deterministic, secret-free cache key including request context
+   * to guarantee complete data isolation between audit requests.
    */
-  public static createKey(entityId: string, entityType?: string, location?: string): string {
+  public static createKey(
+    entityId: string,
+    entityType?: string,
+    location?: string,
+    audience?: string,
+    constraints?: string | string[]
+  ): string {
     const safeId = (entityId || '').trim().toLowerCase();
     const safeType = (entityType || '').trim().toLowerCase();
     const safeLoc = (location || '').trim().toLowerCase();
-    return `ev_${safeId}::${safeType}::${safeLoc}`;
+    let key = `ev_${safeId}::${safeType}::${safeLoc}`;
+    if (audience && audience.trim().length > 0) {
+      key += `::aud_${audience.trim().toLowerCase()}`;
+    }
+    const safeConst = Array.isArray(constraints)
+      ? constraints.map((c) => c.trim().toLowerCase()).filter(Boolean).sort().join('|')
+      : (constraints || '').trim().toLowerCase();
+    if (safeConst.length > 0) {
+      key += `::const_${safeConst}`;
+    }
+    return key;
   }
 
   public get(key: string): T | undefined {

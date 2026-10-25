@@ -145,6 +145,11 @@ export class EntityResolutionService {
       };
     }
 
+    // Branch to Discovery Resolution for natural-language discovery requests
+    if (context?.isDiscovery) {
+      return this.resolveDiscovery(trimmedQuery, context);
+    }
+
     // Retrieve candidates from server-side Qloo client
     logger.info(`Resolving concept "${trimmedQuery}" with Qloo Hackathon API...`);
     let rawCandidates = await this.client.searchCandidates(trimmedQuery, { take: 10 });
@@ -266,6 +271,216 @@ export class EntityResolutionService {
         retrievedAt,
         correlationId,
         resolutionStatus: 'unresolved'
+      }
+    };
+  }
+
+  /**
+   * Performs Qloo-backed candidate discovery for natural-language discovery requests.
+   * Discovers real verified candidates from Qloo using domain, preferences, and constraints,
+   * without hallucinating entities or bypassing Qloo verification.
+   */
+  public async resolveDiscovery(
+    query: string,
+    context?: EntityResolutionContext
+  ): Promise<EntityResolutionResult> {
+    const correlationId = `disc_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const trimmedQuery = (query || '').trim();
+    const retrievedAt = new Date().toISOString();
+
+    // 1. Determine target entity type from category or discovery intent
+    const category = (
+      context?.categoryHint ||
+      context?.discoveryIntent?.category ||
+      context?.discoveryIntent?.domain ||
+      ''
+    ).toLowerCase();
+
+    let targetType: string | undefined;
+    if (category.includes('movie') || category.includes('film')) {
+      targetType = 'urn:entity:movie';
+    } else if (category.includes('place') || category.includes('restaurant') || category.includes('cafe')) {
+      targetType = 'urn:entity:place';
+    } else if (category.includes('artist') || category.includes('music')) {
+      targetType = 'urn:entity:artist';
+    } else if (category.includes('book')) {
+      targetType = 'urn:entity:book';
+    }
+
+    // 2. Formulate ordered search phrases from discovery context, constraints, and audience
+    const searchPhrases: string[] = [];
+
+    // Descriptive preferences from parser
+    if (context?.discoveryIntent?.descriptivePreferences && context.discoveryIntent.descriptivePreferences.length > 0) {
+      searchPhrases.push(...context.discoveryIntent.descriptivePreferences);
+    }
+
+    // Cleaned query
+    if (context?.discoveryIntent?.cleanQuery && !searchPhrases.includes(context.discoveryIntent.cleanQuery)) {
+      searchPhrases.push(context.discoveryIntent.cleanQuery);
+    }
+
+    // Positive constraints
+    if (context?.constraints && context.constraints.length > 0) {
+      const positiveConstraints = context.constraints.filter(
+        (c) => !c.toLowerCase().startsWith('no ') && !c.toLowerCase().startsWith('without ')
+      );
+      positiveConstraints.forEach((c) => {
+        const cleanConstraint = c.replace(/^(?:prefer|something|must\s+be|with)\s+/i, '').trim();
+        if (cleanConstraint && !searchPhrases.includes(cleanConstraint)) {
+          searchPhrases.push(cleanConstraint);
+        }
+      });
+    }
+
+    // Audience context
+    if (context?.audience && context.audience.trim().length > 0) {
+      const cleanAudience = context.audience.replace(/^(?:someone\s+who\s+enjoys|people\s+looking\s+for|for)\s+/i, '').trim();
+      if (cleanAudience && !searchPhrases.includes(cleanAudience)) {
+        searchPhrases.push(cleanAudience);
+      }
+    }
+
+    // Fallback: query itself if nothing else
+    if (searchPhrases.length === 0 && trimmedQuery.length > 0) {
+      searchPhrases.push(trimmedQuery);
+    }
+
+    logger.info(`[Discovery] Sourcing verified Qloo candidates using search phrases: ${JSON.stringify(searchPhrases)}`);
+
+    let rawCandidates: NormalizedCandidate[] = [];
+
+    for (const phrase of searchPhrases) {
+      try {
+        const found = await this.client.searchCandidates(phrase, { type: targetType, take: 10 });
+        if (found.length > 0) {
+          rawCandidates.push(...found);
+        }
+      } catch (err) {
+        logger.warn(`[Discovery] Candidate search for phrase "${phrase}" failed: ${err}`);
+      }
+      if (rawCandidates.length >= 8) break;
+    }
+
+    rawCandidates = CandidateNormalizer.deduplicate(rawCandidates);
+
+    // If still no candidates found and targetType is known, try a broad category search
+    if (rawCandidates.length === 0 && category) {
+      try {
+        const fallback = await this.client.searchCandidates(category, { type: targetType, take: 6 });
+        rawCandidates = CandidateNormalizer.deduplicate(fallback);
+      } catch {
+        // Safe error suppression
+      }
+    }
+
+    // Guard: if Qloo returned 0 candidates, safely abstain without hallucinating
+    if (rawCandidates.length === 0) {
+      logger.info(`[Discovery] No Qloo candidates found for discovery request "${trimmedQuery}". Safely abstaining.`);
+      return {
+        query: trimmedQuery,
+        status: 'unresolved',
+        candidates: [],
+        derivedConfidence: 0,
+        reason: `Zero matching entities or tags found in Qloo for discovery query "${trimmedQuery}".`,
+        provenance: {
+          qlooType: targetType || 'unknown',
+          source: 'qloo-hackathon-api',
+          operation: 'resolve_discovery_entity',
+          classification: 'Unverified',
+          retrievedAt,
+          correlationId,
+          resolutionStatus: 'unresolved'
+        }
+      };
+    }
+
+    // Score candidates deterministically for discovery relevance
+    const scoredCandidates = rawCandidates.map((c) => {
+      let score = 0;
+
+      // 1. Type compatibility (weight: 0.40)
+      const typeEval = evaluateTypeCompatibility(c, context);
+      score += typeEval.scoreBonus * (0.40 / 0.30); // scale up to 0.40
+
+      // 2. Location compatibility (weight: 0.25)
+      if (context?.location && isLocationMatch(c, context.location)) {
+        score += 0.25;
+      }
+
+      // 3. Tag and context match (weight: 0.25)
+      const cTags = (c.tags || []).map((t) => t.toLowerCase());
+      const searchTokens = searchPhrases.join(' ').toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+      const tagMatchCount = cTags.filter((t) => searchTokens.some((tok) => t.includes(tok))).length;
+      if (tagMatchCount >= 2) {
+        score += 0.25;
+      } else if (tagMatchCount === 1) {
+        score += 0.15;
+      }
+
+      // 4. Qloo popularity signal (weight: 0.10)
+      if (typeof c.popularity === 'number' && c.popularity > 0) {
+        score += Math.min(0.10, c.popularity * 0.10);
+      }
+
+      // Preference for concrete entities over pure tags in discovery
+      if (c.category === 'entity') {
+        score += 0.05;
+      }
+
+      return {
+        candidate: c,
+        score: Math.min(1.0, Math.round(score * 10000) / 10000)
+      };
+    }).sort((a, b) => b.score - a.score);
+
+    const top = scoredCandidates[0];
+
+    // Candidate must have valid type compatibility or minimum score
+    if (!top || (targetType && !top.candidate.type.includes(category.slice(0, 4)) && top.score < 0.25)) {
+      return {
+        query: trimmedQuery,
+        status: 'unresolved',
+        candidates: scoredCandidates.map((s) => s.candidate),
+        derivedConfidence: top?.score || 0,
+        reason: `Discovered candidates did not satisfy domain type compatibility for "${category}".`,
+        provenance: {
+          qlooType: targetType || 'unknown',
+          source: 'qloo-hackathon-api',
+          operation: 'resolve_discovery_entity',
+          classification: 'Unverified',
+          retrievedAt,
+          correlationId,
+          resolutionStatus: 'unresolved'
+        }
+      };
+    }
+
+    logger.info(`[Discovery] Resolved discovery intent "${trimmedQuery}" -> "${top.candidate.name}" (${top.candidate.id}, score: ${top.score})`);
+
+    return {
+      query: trimmedQuery,
+      status: 'resolved',
+      resolvedEntity: top.candidate,
+      candidates: scoredCandidates.map((s) => s.candidate),
+      derivedConfidence: top.score,
+      reason: `Discovered verified Qloo candidate "${top.candidate.name}" (${top.candidate.type}) matching discovery intent.`,
+      provenance: {
+        entityId: top.candidate.category === 'entity' ? top.candidate.id : undefined,
+        tagId: top.candidate.category === 'tag' ? top.candidate.id : undefined,
+        qlooType: top.candidate.type,
+        source: 'qloo-hackathon-api',
+        operation: 'resolve_discovery_entity',
+        classification: 'Supported',
+        retrievedAt,
+        correlationId,
+        resolutionStatus: 'resolved',
+        details: {
+          isDiscovery: true,
+          derivedMatchScore: top.score,
+          candidatesCount: scoredCandidates.length,
+          qlooPopularity: top.candidate.popularity
+        }
       }
     };
   }

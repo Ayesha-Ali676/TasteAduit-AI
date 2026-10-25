@@ -72,14 +72,22 @@ export class TasteAuditOrchestrator {
         categoryHint: item.category,
         location: input.location,
         audience: input.audienceContext,
-        constraints: input.constraints
+        constraints: input.constraints,
+        isDiscovery: item.isDiscovery,
+        discoveryIntent: item.discoveryIntent
       });
 
       let evidence: NormalizedEvidenceResult;
 
       if (resolution.status === 'resolved' && resolution.resolvedEntity) {
         resolvedCount++;
-        logger.info(`Resolved "${item.name}" -> ${resolution.resolvedEntity.id}. Executing Stage 3: RETRIEVE`);
+        if (item.isDiscovery) {
+          logger.info(`Discovered "${resolution.resolvedEntity.name}" (${resolution.resolvedEntity.id}) for discovery request "${item.name}". Executing Stage 3: RETRIEVE`);
+          item.rationale = `Discovered for: "${item.name}"`;
+          item.name = resolution.resolvedEntity.name;
+        } else {
+          logger.info(`Resolved "${item.name}" -> ${resolution.resolvedEntity.id}. Executing Stage 3: RETRIEVE`);
+        }
         evidence = await this.evidenceSvc.retrieveEvidence({
           entityId: resolution.resolvedEntity.id,
           entityName: resolution.resolvedEntity.name,

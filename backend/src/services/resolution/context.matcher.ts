@@ -5,6 +5,7 @@
  */
 
 import { NormalizedCandidate, EntityResolutionContext } from '../qloo/qloo.types.js';
+import { ItemResolutionEnvelope } from '../orchestrator/stages.types.js';
 
 export interface ContextMatchResult {
   isCompatible: boolean;
@@ -13,7 +14,7 @@ export interface ContextMatchResult {
 }
 
 // Regex patterns representing general cultural domains
-const DOMAIN_PATTERNS = {
+export const DOMAIN_PATTERNS = {
   movie: /\b(cinema|movie|movies|film|films|motion picture|theatrical|screenplay|hollywood|cinematic)\b/i,
   music: /\b(music|musical|band|musician|singer|concert|album|song|track|discography|audiophile|soundtrack|jazz|bop|blues|rock|hip hop)\b/i,
   musicArtist: /\b(band|artist|artists|musician|musicians|singer|vocalist|trio|quartet|quintet)\b/i,
@@ -167,4 +168,360 @@ export function evaluateTypeCompatibility(
     scoreBonus: isWellFormed ? 0.15 : 0.0,
     matchReason: isWellFormed ? 'Neutral baseline for well-formed URN' : undefined
   };
+}
+
+// ---------------------------------------------------------------------------
+// Candidate Semantic Compatibility Firewall
+// ---------------------------------------------------------------------------
+
+export type SemanticDomain = 'movie' | 'music' | 'dining' | 'book' | 'unknown';
+
+export interface SemanticTypeEvaluation {
+  domain: SemanticDomain;
+  normalizedSemanticType: string;
+  isConfident: boolean;
+}
+
+export interface CandidateCompatibilityResult {
+  isCompatible: boolean;
+  targetDomain: SemanticDomain;
+  candidateDomain: SemanticDomain;
+  normalizedSemanticType: string;
+  reason: string;
+}
+
+/**
+ * Maps a candidate entity's metadata (type, tags, category, disambiguation) to a normalized semantic domain and label.
+ * Under no circumstances does this guess or default to an unrelated category.
+ */
+export function evaluateCandidateSemanticType(candidate: {
+  type?: string;
+  tags?: string[];
+  category?: string;
+  disambiguation?: string;
+  name?: string;
+}): SemanticTypeEvaluation {
+  const typeLower = (candidate.type || '').toLowerCase().trim();
+  const tagsLower = (candidate.tags || []).map((t) => t.toLowerCase());
+
+  // 1. Direct type evaluations
+  if (
+    typeLower.includes('movie') ||
+    typeLower.includes('film') ||
+    typeLower.includes('tv_show') ||
+    typeLower.includes('urn:entity:movie')
+  ) {
+    return { domain: 'movie', normalizedSemanticType: 'movie', isConfident: true };
+  }
+
+  if (
+    typeLower.includes('artist') ||
+    typeLower.includes('musician') ||
+    typeLower.includes('band') ||
+    typeLower.includes('urn:entity:artist')
+  ) {
+    return { domain: 'music', normalizedSemanticType: 'music artist', isConfident: true };
+  }
+
+  if (
+    typeLower.includes('album') ||
+    typeLower.includes('record') ||
+    typeLower.includes('track') ||
+    typeLower.includes('song') ||
+    typeLower.includes('urn:entity:album')
+  ) {
+    return { domain: 'music', normalizedSemanticType: 'music album', isConfident: true };
+  }
+
+  if (typeLower.includes('genre:music') || typeLower.includes('urn:tag:genre:music')) {
+    return { domain: 'music', normalizedSemanticType: 'music genre', isConfident: true };
+  }
+
+  if (
+    typeLower.includes('place') ||
+    typeLower.includes('restaurant') ||
+    typeLower.includes('cafe') ||
+    typeLower.includes('bar') ||
+    typeLower.includes('venue') ||
+    typeLower.includes('bistro') ||
+    typeLower.includes('eatery') ||
+    typeLower.includes('urn:entity:place')
+  ) {
+    const isRestaurant = typeLower.includes('restaurant') || tagsLower.some((t) => t.includes('restaurant'));
+    return {
+      domain: 'dining',
+      normalizedSemanticType: isRestaurant ? 'restaurant' : 'place / restaurant',
+      isConfident: true
+    };
+  }
+
+  if (
+    typeLower.includes('book') ||
+    typeLower.includes('novel') ||
+    typeLower.includes('author') ||
+    typeLower.includes('urn:entity:book')
+  ) {
+    return { domain: 'book', normalizedSemanticType: 'book', isConfident: true };
+  }
+
+  // 2. Brand entities: A brand is compatible with dining ONLY if tags or context establish it as a dining venue
+  if (typeLower.includes('brand') || typeLower.includes('urn:entity:brand')) {
+    const hasPlaceTag = tagsLower.some((t) => DOMAIN_PATTERNS.place.test(t));
+    if (hasPlaceTag) {
+      return { domain: 'dining', normalizedSemanticType: 'dining brand / venue', isConfident: true };
+    }
+    const hasMovieTag = tagsLower.some((t) => DOMAIN_PATTERNS.movie.test(t));
+    if (hasMovieTag) {
+      return { domain: 'movie', normalizedSemanticType: 'film brand', isConfident: true };
+    }
+    const hasMusicTag = tagsLower.some((t) => DOMAIN_PATTERNS.music.test(t));
+    if (hasMusicTag) {
+      return { domain: 'music', normalizedSemanticType: 'music brand', isConfident: true };
+    }
+    return { domain: 'unknown', normalizedSemanticType: 'brand', isConfident: false };
+  }
+
+  // 3. Fallback: inspect name and disambiguation clues if type is missing or generic
+  const nameAndClues = `${candidate.name || ''} ${candidate.disambiguation || ''}`.toLowerCase();
+  if (DOMAIN_PATTERNS.movie.test(nameAndClues)) {
+    return { domain: 'movie', normalizedSemanticType: 'movie', isConfident: true };
+  }
+  if (DOMAIN_PATTERNS.place.test(nameAndClues)) {
+    const isRestaurant = /\b(restaurant|eatery|bistro|diner)\b/i.test(nameAndClues);
+    return {
+      domain: 'dining',
+      normalizedSemanticType: isRestaurant ? 'restaurant' : 'place / restaurant',
+      isConfident: true
+    };
+  }
+  if (DOMAIN_PATTERNS.music.test(nameAndClues)) {
+    const wantsAlbum = DOMAIN_PATTERNS.musicAlbum.test(nameAndClues);
+    return {
+      domain: 'music',
+      normalizedSemanticType: wantsAlbum ? 'music album' : 'music artist',
+      isConfident: true
+    };
+  }
+  if (DOMAIN_PATTERNS.book.test(nameAndClues)) {
+    return { domain: 'book', normalizedSemanticType: 'book', isConfident: true };
+  }
+
+  // 4. Fallback: inspect tags if type is missing, unknown, or generic
+  if (tagsLower.length > 0) {
+    if (tagsLower.some((t) => DOMAIN_PATTERNS.place.test(t))) {
+      const isRestaurant = tagsLower.some((t) => t.includes('restaurant') || t.includes('dining') || t.includes('food'));
+      return {
+        domain: 'dining',
+        normalizedSemanticType: isRestaurant ? 'restaurant' : 'place / restaurant',
+        isConfident: true
+      };
+    }
+    if (tagsLower.some((t) => DOMAIN_PATTERNS.movie.test(t))) {
+      return { domain: 'movie', normalizedSemanticType: 'movie', isConfident: true };
+    }
+    if (tagsLower.some((t) => DOMAIN_PATTERNS.music.test(t))) {
+      const wantsAlbum = tagsLower.some((t) => DOMAIN_PATTERNS.musicAlbum.test(t));
+      return {
+        domain: 'music',
+        normalizedSemanticType: wantsAlbum ? 'music album' : 'music artist',
+        isConfident: true
+      };
+    }
+    if (tagsLower.some((t) => DOMAIN_PATTERNS.book.test(t))) {
+      return { domain: 'book', normalizedSemanticType: 'book', isConfident: true };
+    }
+  }
+
+  // Ambiguous or unverifiable
+  return {
+    domain: 'unknown',
+    normalizedSemanticType: 'Candidate semantic type could not be confidently verified.',
+    isConfident: false
+  };
+}
+
+/**
+ * Resolves the target recommendation item's semantic domain from normalized metadata and context.
+ */
+export function resolveTargetSemanticDomain(
+  envelope: ItemResolutionEnvelope,
+  context?: { audience?: string; location?: string; constraints?: string[]; categoryHint?: string }
+): SemanticDomain {
+  const itemCategory = (envelope.item.category || '').toLowerCase().trim();
+  const resolvedType = (
+    envelope.resolution.resolvedEntity?.type ||
+    envelope.resolution.provenance?.qlooType ||
+    ''
+  ).toLowerCase().trim();
+  const resolvedTags = (envelope.resolution.resolvedEntity?.tags || []).map((t) => t.toLowerCase());
+  const contextTokens = [
+    context?.categoryHint,
+    context?.audience,
+    ...(context?.constraints || [])
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  // 1. Direct Category/Type hints for Movie
+  if (
+    itemCategory.includes('movie') ||
+    itemCategory.includes('film') ||
+    itemCategory.includes('cinema') ||
+    resolvedType.includes('movie') ||
+    resolvedType.includes('film') ||
+    resolvedType.includes('tv_show')
+  ) {
+    return 'movie';
+  }
+
+  // 2. Direct Category/Type hints for Music
+  if (
+    itemCategory.includes('music') ||
+    itemCategory.includes('artist') ||
+    itemCategory.includes('album') ||
+    resolvedType.includes('artist') ||
+    resolvedType.includes('album') ||
+    resolvedType.includes('genre:music') ||
+    resolvedType.includes('track')
+  ) {
+    return 'music';
+  }
+
+  // 3. Direct Category/Type hints for Dining / Place / Restaurant
+  if (
+    itemCategory.includes('dining') ||
+    itemCategory.includes('restaurant') ||
+    itemCategory.includes('food') ||
+    itemCategory.includes('cafe') ||
+    itemCategory.includes('place') ||
+    resolvedType.includes('place') ||
+    resolvedType.includes('restaurant') ||
+    resolvedType.includes('cafe') ||
+    resolvedType.includes('bar')
+  ) {
+    return 'dining';
+  }
+
+  // Brand entities: Brand with place/dining tags or place context (e.g. restaurant brands)
+  if (resolvedType.includes('brand')) {
+    const hasPlaceTag = resolvedTags.some((t) => DOMAIN_PATTERNS.place.test(t));
+    const hasPlaceContext = DOMAIN_PATTERNS.place.test(contextTokens);
+    if (hasPlaceTag || hasPlaceContext) {
+      return 'dining';
+    }
+    const hasMovieTag = resolvedTags.some((t) => DOMAIN_PATTERNS.movie.test(t));
+    if (hasMovieTag) return 'movie';
+    const hasMusicTag = resolvedTags.some((t) => DOMAIN_PATTERNS.music.test(t));
+    if (hasMusicTag) return 'music';
+  }
+
+  // 4. Direct Category/Type hints for Book
+  if (
+    itemCategory.includes('book') ||
+    itemCategory.includes('novel') ||
+    itemCategory.includes('literature') ||
+    resolvedType.includes('book') ||
+    resolvedType.includes('author')
+  ) {
+    return 'book';
+  }
+
+  // 5. Context Patterns
+  if (DOMAIN_PATTERNS.place.test(contextTokens)) {
+    return 'dining';
+  }
+  if (DOMAIN_PATTERNS.movie.test(contextTokens)) {
+    return 'movie';
+  }
+  if (DOMAIN_PATTERNS.music.test(contextTokens)) {
+    return 'music';
+  }
+  if (DOMAIN_PATTERNS.book.test(contextTokens)) {
+    return 'book';
+  }
+
+  // 6. Resolved tags fallback inspection
+  if (resolvedTags.some((t) => DOMAIN_PATTERNS.place.test(t))) return 'dining';
+  if (resolvedTags.some((t) => DOMAIN_PATTERNS.movie.test(t))) return 'movie';
+  if (resolvedTags.some((t) => DOMAIN_PATTERNS.music.test(t))) return 'music';
+  if (resolvedTags.some((t) => DOMAIN_PATTERNS.book.test(t))) return 'book';
+
+  return 'unknown';
+}
+
+/**
+ * Checks whether a candidate is semantically compatible with the target recommendation.
+ * Strict firewall validation before Agent repair candidate selection.
+ */
+export function evaluateCandidateCompatibility(
+  targetEnvelope: ItemResolutionEnvelope,
+  candidate: {
+    type?: string;
+    tags?: string[];
+    category?: string;
+    disambiguation?: string;
+    name?: string;
+  },
+  context?: { audience?: string; location?: string; constraints?: string[]; categoryHint?: string }
+): CandidateCompatibilityResult {
+  const targetDomain = resolveTargetSemanticDomain(targetEnvelope, context);
+  const candidateEval = evaluateCandidateSemanticType(candidate);
+
+  // If candidate semantic type could not be confidently verified
+  if (!candidateEval.isConfident || candidateEval.domain === 'unknown') {
+    return {
+      isCompatible: false,
+      targetDomain,
+      candidateDomain: candidateEval.domain,
+      normalizedSemanticType: candidateEval.normalizedSemanticType,
+      reason: 'incompatible_semantic_type: Candidate semantic type could not be confidently verified.'
+    };
+  }
+
+  // If target domain is unknown, candidate cannot be verified as compatible
+  if (targetDomain === 'unknown') {
+    return {
+      isCompatible: false,
+      targetDomain,
+      candidateDomain: candidateEval.domain,
+      normalizedSemanticType: candidateEval.normalizedSemanticType,
+      reason: 'incompatible_semantic_type: Target recommendation domain could not be verified.'
+    };
+  }
+
+  // Check exact domain match
+  if (targetDomain === candidateEval.domain) {
+    return {
+      isCompatible: true,
+      targetDomain,
+      candidateDomain: candidateEval.domain,
+      normalizedSemanticType: candidateEval.normalizedSemanticType,
+      reason: `Compatible: Candidate matches target domain "${targetDomain}".`
+    };
+  }
+
+  // Cross-domain mismatch: strictly reject
+  return {
+    isCompatible: false,
+    targetDomain,
+    candidateDomain: candidateEval.domain,
+    normalizedSemanticType: candidateEval.normalizedSemanticType,
+    reason: `incompatible_semantic_type: Target is "${targetDomain}" but candidate "${candidate.name || 'Unknown'}" is "${candidateEval.domain}" (${candidateEval.normalizedSemanticType}).`
+  };
+}
+
+/**
+ * Returns the primary Qloo entity URN type for a given semantic domain.
+ */
+export function getTargetQlooEntityType(domain: SemanticDomain): string | undefined {
+  switch (domain) {
+    case 'movie':
+      return 'urn:entity:movie';
+    case 'music':
+      return 'urn:entity:artist';
+    case 'dining':
+      return 'urn:entity:place';
+    case 'book':
+      return 'urn:entity:book';
+    default:
+      return undefined;
+  }
 }

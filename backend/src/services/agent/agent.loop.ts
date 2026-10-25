@@ -18,6 +18,7 @@ import {
 } from './agent.types.js';
 import { AgentDecisionSchema } from './agent.schemas.js';
 import { buildAgentSystemPrompt, buildAgentUserPrompt } from './agent.prompts.js';
+import { evaluateCandidateCompatibility } from '../resolution/context.matcher.js';
 import { logger } from '../../utils/logger.js';
 
 export interface AgentLoopDependencies {
@@ -398,7 +399,7 @@ export class TasteAuditAgentLoop {
             decision: 'STOP',
             targetItemId: targetEnvelope.item.id,
             targetItemName: targetEnvelope.item.name,
-            reasoning: `Zero verified Qloo alternative candidates available for "${targetEnvelope.item.name}". Under Evidence Firewall, no replacement can be fabricated.`,
+            reasoning: `No compatible verified repair candidates available for "${targetEnvelope.item.name}". Under Evidence Firewall, no replacement can be fabricated.`,
             stopReason: 'insufficient_evidence',
             scoreBefore: currentAuditReport.overallScore,
             scoreAfter: currentAuditReport.overallScore,
@@ -436,6 +437,34 @@ export class TasteAuditAgentLoop {
             });
             terminalState = 'STOPPED';
             finalStopReason = 'fabricated_candidate_rejected';
+            break;
+          }
+
+          // Candidate Compatibility Firewall Check
+          const compatibilityCheck = evaluateCandidateCompatibility(
+            targetEnvelope,
+            matchedCandidate,
+            evaluationContext
+          );
+          if (!compatibilityCheck.isCompatible) {
+            logger.warn(
+              `[Evidence Firewall Violation] Agent suggested semantically incompatible candidate "${matchedCandidate.name}" (${matchedCandidate.entityId}).`
+            );
+            addTraceEvent({
+              iteration,
+              state: 'COMPLETED',
+              decision: 'STOP',
+              targetItemId: targetEnvelope.item.id,
+              targetItemName: targetEnvelope.item.name,
+              reasoning: `Evidence Firewall rejected candidate "${matchedCandidate.name}" (${matchedCandidate.entityId}): ${compatibilityCheck.reason}`,
+              stopReason: 'incompatible_semantic_type',
+              scoreBefore: currentAuditReport.overallScore,
+              scoreAfter: currentAuditReport.overallScore,
+              scoreDelta: 0,
+              evidenceRefs: []
+            });
+            terminalState = 'STOPPED';
+            finalStopReason = 'incompatible_semantic_type';
             break;
           }
         }

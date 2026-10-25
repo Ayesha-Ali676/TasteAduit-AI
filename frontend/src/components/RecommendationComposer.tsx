@@ -72,10 +72,35 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
   const [activeScenarioId, setActiveScenarioId] = useState<string>('');
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Scenario shortcut populates editable values
+  // Scenario shortcut populates editable values or toggles off if already active
   const handleSelectScenario = (sc: Scenario) => {
+    if (activeScenarioId === sc.id) {
+      // Toggle off and reset
+      setActiveScenarioId('');
+      setFormData({
+        recommendations: '',
+        audienceContext: '',
+        location: '',
+        constraints: '',
+        enableAgent: true
+      });
+      setValidationError(null);
+      return;
+    }
     setActiveScenarioId(sc.id);
     setFormData({ ...sc.data });
+    setValidationError(null);
+  };
+
+  const handleClearForm = () => {
+    setActiveScenarioId('');
+    setFormData({
+      recommendations: '',
+      audienceContext: '',
+      location: '',
+      constraints: '',
+      enableAgent: true
+    });
     setValidationError(null);
   };
 
@@ -89,38 +114,64 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
     onSubmit(formData);
   };
 
+  const hasAnyInput = Boolean(
+    activeScenarioId ||
+    formData.recommendations.trim() ||
+    formData.audienceContext.trim() ||
+    formData.location.trim() ||
+    formData.constraints.trim()
+  );
+
   return (
     <div className="w-full max-w-4xl mx-auto space-y-4">
       {/* Quick Scenario Chips */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-        <div className="flex items-center gap-2 text-xs font-semibold text-sage-dark">
-          <Sparkles className="w-3.5 h-3.5 text-sage" />
-          <span>TRY A SCENARIO:</span>
+      <div className="space-y-2 px-1">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-sage-dark">
+            <Sparkles className="w-3.5 h-3.5 text-sage" />
+            <span>TRY A SCENARIO:</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {SCENARIOS.map((sc) => {
+              const isSelected = activeScenarioId === sc.id;
+              return (
+                <button
+                  key={sc.id}
+                  type="button"
+                  onClick={() => handleSelectScenario(sc)}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-sage-dark text-white font-bold shadow-sm'
+                      : 'bg-white hover:bg-sage-mint/40 text-sage-dark border border-sage-mint shadow-xs'
+                  }`}
+                  title={isSelected ? 'Click to deselect scenario' : `Load ${sc.name} starter example`}
+                >
+                  {sc.isFlagship && <span>⭐</span>}
+                  <span>{sc.name}</span>
+                  <span className={`text-[11px] ${isSelected ? 'text-sage-mint' : 'text-sage-muted'}`}>
+                    &middot; {sc.tag}
+                  </span>
+                </button>
+              );
+            })}
+
+            {hasAnyInput && (
+              <button
+                type="button"
+                onClick={handleClearForm}
+                className="text-[11px] text-sage-muted hover:text-sage-dark px-2.5 py-1 rounded-full hover:bg-sage-mint/30 transition cursor-pointer"
+              >
+                Reset / Clear
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {SCENARIOS.map((sc) => {
-            const isSelected = activeScenarioId === sc.id;
-            return (
-              <button
-                key={sc.id}
-                type="button"
-                onClick={() => handleSelectScenario(sc)}
-                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs transition-all cursor-pointer ${
-                  isSelected
-                    ? 'bg-sage-dark text-white font-bold shadow-sm'
-                    : 'bg-white hover:bg-sage-mint/40 text-sage-dark border border-sage-mint shadow-xs'
-                }`}
-              >
-                {sc.isFlagship && <span>⭐</span>}
-                <span>{sc.name}</span>
-                <span className={`text-[11px] ${isSelected ? 'text-sage-mint' : 'text-sage-muted'}`}>
-                  &middot; {sc.tag}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        {/* Subtle, non-defensive helper message for judges and users */}
+        <p className="text-xs text-sage-muted font-normal">
+          Live starter examples — edit any field and run your own audit.
+        </p>
       </div>
 
       {/* Main Single Composer Canvas: Crisp White with Soft Sage Border */}
@@ -147,7 +198,7 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
             rows={3}
             value={formData.recommendations}
             onChange={(e) => {
-              setFormData({ ...formData, recommendations: e.target.value });
+              setFormData((prev) => ({ ...prev, recommendations: e.target.value }));
               if (validationError) setValidationError(null);
             }}
             placeholder="e.g. Recommend 3 movies similar to Pulp Fiction"

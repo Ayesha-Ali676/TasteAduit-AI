@@ -28,11 +28,22 @@ export interface GroundingScore {
   breakdown: ScoreBreakdown;
 }
 
+export interface DiscoveryIntent {
+  isDiscovery: boolean;
+  domain?: string;
+  category?: string;
+  descriptivePreferences: string[];
+  cleanQuery: string;
+  rawRequest: string;
+}
+
 export interface ExtractedItem {
   id: string;
   name: string;
   category?: string;
   rationale?: string;
+  isDiscovery?: boolean;
+  discoveryIntent?: DiscoveryIntent;
 }
 
 export interface ResolvedEntity {
@@ -75,6 +86,8 @@ export interface ParseStageOutput {
   audienceContext?: string;
   location?: string;
   constraints: string[];
+  isDiscovery?: boolean;
+  discoveryIntent?: DiscoveryIntent;
 }
 
 // -------------------------------------------------------------
