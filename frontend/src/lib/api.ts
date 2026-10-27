@@ -1,8 +1,16 @@
 import { AuditFormData, AuditResponse } from '../types/audit';
 
+declare global {
+  interface ImportMeta {
+    readonly env: Record<string, string | undefined>;
+  }
+}
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
 export async function checkBackendHealth(): Promise<{ status: string; service: string }> {
   try {
-    const response = await fetch('/api/health');
+    const response = await fetch(`${API_BASE_URL}/api/health`);
     if (!response.ok) {
       throw new Error(`Health check failed with status ${response.status}`);
     }
@@ -31,7 +39,7 @@ export async function submitAudit(data: AuditFormData): Promise<AuditResponse> {
   };
 
   try {
-    const response = await fetch('/api/audit', {
+    const response = await fetch(`${API_BASE_URL}/api/audit`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

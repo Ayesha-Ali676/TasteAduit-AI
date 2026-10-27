@@ -2,7 +2,7 @@ import { app } from './app.js';
 import { config } from './utils/config.js';
 import { logger } from './utils/logger.js';
 
-const server = app.listen(config.port, () => {
+const server = app.listen(config.port, '0.0.0.0', () => {
   logger.info(`TasteAudit API server listening on http://localhost:${config.port}`);
   logger.info(`Environment: ${config.nodeEnv}`);
   logger.info(`Qloo Base URL: ${config.qloo.baseUrl}`);
