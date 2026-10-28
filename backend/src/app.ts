@@ -14,7 +14,16 @@ export function createApp(): Express {
   // CORS configuration
   app.use(cors());
 
-  // Mount API routes
+  // Root health probe for cloud platform monitoring (Render, load balancers, etc.)
+  app.get('/', (_req, res) => {
+    res.status(200).json({
+      status: 'ok',
+      service: 'tasteaudit-api'
+    });
+  });
+
+  // Mount API & health routes
+  app.use('/health', healthRouter);
   app.use('/api', healthRouter);
   app.use('/api', auditRouter);
 
