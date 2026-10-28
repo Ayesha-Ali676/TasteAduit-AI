@@ -16,6 +16,7 @@ export interface AIProviderConfig {
 export interface AppConfig {
   port: number;
   nodeEnv: string;
+  frontendOrigin?: string;
   qloo: {
     baseUrl: string;
     apiKey?: string;
@@ -62,6 +63,7 @@ export function loadConfig(): AppConfig {
   return {
     port: parseInt(process.env.PORT || '3001', 10),
     nodeEnv: process.env.NODE_ENV || 'development',
+    frontendOrigin: process.env.FRONTEND_ORIGIN?.trim(),
     qloo: {
       baseUrl: baseUrl.replace(/\/+$/, ''),
       apiKey
