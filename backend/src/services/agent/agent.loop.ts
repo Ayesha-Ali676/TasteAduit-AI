@@ -224,15 +224,6 @@ export class TasteAuditAgentLoop {
         }
       ];
 
-      addTraceEvent({
-        iteration,
-        state: 'EVALUATING',
-        decision: 'STOP', // Placeholder while evaluating
-        reasoning: `Evaluating audit results against cultural taste constraints at iteration ${iteration}.`,
-        scoreBefore: currentAuditReport.overallScore,
-        evidenceRefs: []
-      });
-
       const remainingMs = Math.max(1000, timeoutMs - (Date.now() - startTime));
       const aiResult = await this.ai.executeCompletion(messages, {
         jsonMode: true,
@@ -247,7 +238,7 @@ export class TasteAuditAgentLoop {
           iteration,
           state: 'COMPLETED',
           decision: 'STOP',
-          reasoning: `AI reasoning provider failed (${aiResult.error || 'Empty response'}). Preserving deterministic baseline.`,
+          reasoning: 'AI Agent unavailable — deterministic Qloo audit preserved.',
           stopReason: 'provider_failure',
           scoreBefore: currentAuditReport.overallScore,
           scoreAfter: currentAuditReport.overallScore,
@@ -537,7 +528,7 @@ export class TasteAuditAgentLoop {
             }
           : undefined;
 
-        // Clarification 1: A zero/negative score delta after REPAIR should safely stop the loop
+        // Zero or negative score delta after REPAIR: safely stop loop without claiming false success
         if (scoreDelta <= 0) {
           logger.warn(
             `[AgentLoop] Repair on "${targetEnvelope.item.name}" yielded zero or negative improvement (${scoreDelta}). Stopping loop.`
@@ -545,17 +536,17 @@ export class TasteAuditAgentLoop {
           addTraceEvent({
             iteration,
             state: 'COMPLETED',
-            decision: 'REPAIR',
+            decision: 'STOP',
             targetItemId: targetEnvelope.item.id,
             targetItemName: targetEnvelope.item.name,
-            reasoning: `Repair executed but generated zero or negative grounding improvement (Delta: ${scoreDelta}). Stopping loop per convergence policy.`,
+            reasoning: 'Repair attempted, but deterministic re-audit found no improvement. Original grounded result preserved.',
             actionPerformed: {
-              action: 'repair_diminishing_returns',
+              action: 'no_improvement',
               candidateSelected: candidateInfo
             },
             scoreBefore,
-            scoreAfter,
-            scoreDelta,
+            scoreAfter: scoreBefore,
+            scoreDelta: 0,
             evidenceRefs: repairRes.evidenceRefs,
             stopReason: 'zero_improvement_repair_stop'
           });

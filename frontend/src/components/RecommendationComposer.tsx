@@ -160,7 +160,7 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
               <button
                 type="button"
                 onClick={handleClearForm}
-                className="text-[11px] text-sage-muted hover:text-sage-dark px-2.5 py-1 rounded-full hover:bg-sage-mint/30 transition cursor-pointer"
+                className="text-[11px] px-2.5 py-1 rounded-full bg-sage-mint border border-sage-soft text-sage-dark shadow-xs hover:bg-sage-soft/50 transition cursor-pointer"
               >
                 Reset / Clear
               </button>

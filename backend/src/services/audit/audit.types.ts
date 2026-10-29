@@ -60,6 +60,7 @@ export interface OverallAuditReport {
     evidenceCompleteness: number;
   };
   totalItemsAudited: number;
+  verifiedItemsCount?: number;
   itemsSummary: {
     supportedCount: number;
     inferredCount: number;

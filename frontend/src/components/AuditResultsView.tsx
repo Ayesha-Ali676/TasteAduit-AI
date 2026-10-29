@@ -93,25 +93,33 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
   const hasAttemptedRepair = repairedItems.length > 0 && repairedItems.some(r => !!r.selectedCandidate);
   const hasSuccessfulRepair = repairedItems.length > 0 && scoreDelta > 0 && repairedItems.some(r => r.verifiedImprovement || (r.scoreDelta ?? 0) > 0);
   const isZeroImprovementRepair = hasAttemptedRepair && scoreDelta <= 0;
+  const isProviderFailure = agentTrace?.finalStopReason === 'provider_failure' && !hasSuccessfulRepair;
   const isCulturallyVerified =
     (agentTrace?.terminalState === 'ACCEPTED' || auditReport?.decision.status === 'supported') &&
     finalScore >= 70;
 
   // Human-friendly status derived deterministically from final score & agent loop outcome
   const getScoreStatus = (score: number) => {
-    if (isZeroImprovementRepair) {
+    if (hasSuccessfulRepair) {
+      return {
+        label: 'Repaired successfully',
+        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        dotClass: 'bg-emerald-500',
+        explanation: 'Recommendations were successfully repaired with culturally grounded alternatives from the Qloo taste graph.'
+      };
+    } else if (isZeroImprovementRepair) {
       return {
         label: 'No improvement — original grounded result preserved',
         badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
         dotClass: 'bg-amber-500',
         explanation: 'Repair candidate evaluated; deterministic re-audit found no improvement. Original grounded result preserved.'
       };
-    } else if (hasSuccessfulRepair) {
+    } else if (isProviderFailure) {
       return {
-        label: 'Repaired successfully',
-        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-        dotClass: 'bg-emerald-500',
-        explanation: 'Recommendations were successfully repaired with culturally grounded alternatives from the Qloo taste graph.'
+        label: 'Provider unavailable — deterministic audit preserved',
+        badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
+        dotClass: 'bg-amber-500',
+        explanation: 'AI reasoning layer was unavailable; deterministic Qloo cultural audit preserved without fabrication.'
       };
     } else if (score >= 80 && agentTrace?.terminalState === 'ACCEPTED') {
       return {
@@ -223,6 +231,20 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                 {statusInfo.label}
               </span>
             </div>
+
+            {/* Multi-Recommendation Summary */}
+            {items.length > 1 && (
+              <div className="text-xs font-bold text-sage-dark flex items-center gap-2 pt-0.5">
+                <span className="px-2.5 py-0.5 rounded-full bg-sage-mint/60 border border-sage-soft text-sage-dark">
+                  Verified: {auditReport?.verifiedItemsCount ?? items.filter(it => it.resolution?.status === 'resolved' && it.audit && it.audit.decision.status !== 'insufficient_evidence').length} / {items.length}{items.some(it => it.resolution?.status === 'unresolved') ? ` • Unverified: ${items.filter(it => it.resolution?.status === 'unresolved').length}` : ''}{items.some(it => it.resolution?.status === 'ambiguous') ? ` • Ambiguous: ${items.filter(it => it.resolution?.status === 'ambiguous').length}` : ''}
+                </span>
+                {scoreDelta === 0 && (
+                  <span className="text-sage-muted font-normal text-[11px]">
+                    (Average verified score)
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Score Delta if repair occurred */}
             {scoreDelta > 0 ? (

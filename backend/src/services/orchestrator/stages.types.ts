@@ -44,7 +44,25 @@ export interface ExtractedItem {
   rationale?: string;
   isDiscovery?: boolean;
   discoveryIntent?: DiscoveryIntent;
+  description?: string;
+  originalText?: string;
+  sourcePosition?: number;
+  originalName?: string;
+  normalizedName?: string;
+  candidateSearchNames?: string[];
+  extractedLocation?: string;
 }
+
+export interface ParsedRecommendationSet {
+  originalText: string;
+  candidates: ExtractedItem[];
+}
+
+
+
+
+
+
 
 export interface ResolvedEntity {
   originalText: string;
@@ -89,6 +107,8 @@ export interface ParseStageOutput {
   isDiscovery?: boolean;
   discoveryIntent?: DiscoveryIntent;
 }
+
+
 
 // -------------------------------------------------------------
 // Stage 2: RESOLVE

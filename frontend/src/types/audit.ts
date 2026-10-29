@@ -125,6 +125,7 @@ export interface OverallAuditReport {
     evidenceCompleteness: number;
   };
   totalItemsAudited: number;
+  verifiedItemsCount?: number;
   itemsSummary: {
     supportedCount: number;
     inferredCount: number;
@@ -211,6 +212,14 @@ export interface ItemResolutionEnvelope {
   item: {
     id: string;
     name: string;
+    category?: string;
+    description?: string;
+    originalText?: string;
+    sourcePosition?: number;
+    originalName?: string;
+    normalizedName?: string;
+    candidateSearchNames?: string[];
+    extractedLocation?: string;
   };
   resolution: EntityResolutionResult;
   evidence?: NormalizedEvidenceResult;

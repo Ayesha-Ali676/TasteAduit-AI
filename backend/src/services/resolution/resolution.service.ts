@@ -11,6 +11,7 @@ import { logger } from '../../utils/logger.js';
 
 import { isLocationMatch } from './location.normalizer.js';
 import { evaluateTypeCompatibility } from './context.matcher.js';
+import { normalizeCandidateSearch } from './candidate.normalizer.js';
 
 function normalizeDiacritics(str: string): string {
   return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -42,7 +43,9 @@ export class EntityResolutionService {
   private scoreCandidate(
     candidate: NormalizedCandidate,
     normalizedQuery: string,
-    context?: EntityResolutionContext
+    context?: EntityResolutionContext,
+    searchVariants?: string[],
+    extractedLocation?: string
   ): ScoredCandidate {
     const cNameRaw = candidate.name.toLowerCase().trim();
     const qRaw = normalizedQuery.trim();
@@ -58,8 +61,14 @@ export class EntityResolutionService {
     let typeMatch = false;
     let locationMatch = false;
 
+    // Check exact / direct match against normalizedQuery or any search variant
+    const variantMatches = (searchVariants || []).some((v) => {
+      const vClean = normalizeDiacritics(v.toLowerCase().trim());
+      return cClean === vClean || stripPluralSuffix(cClean) === stripPluralSuffix(vClean);
+    });
+
     // 1. Name Match Component (Weight: 0.50)
-    if (cNameRaw === qRaw || cClean === qClean) {
+    if (cNameRaw === qRaw || cClean === qClean || variantMatches) {
       derivedScore += 0.50;
       nameMatch = true;
     } else if (cStemmed === qStemmed || cClean.replace(/[^\w\s]/g, '') === qClean.replace(/[^\w\s]/g, '')) {
@@ -73,8 +82,13 @@ export class EntityResolutionService {
       const baseCandidate = cStemmed.split(/\s*[-–—(:]\s*/)[0].trim();
       const baseQuery = qStemmed.split(/\s*[-–—(:]\s*/)[0].trim();
 
-      if (baseCandidate === baseQuery && baseQuery.length > 2) {
-        derivedScore += 0.40;
+      const variantBaseMatch = (searchVariants || []).some((v) => {
+        const vBase = stripPluralSuffix(normalizeDiacritics(v.toLowerCase().trim())).split(/\s*[-–—(:]\s*/)[0].trim();
+        return baseCandidate === vBase && vBase.length > 2;
+      });
+
+      if ((baseCandidate === baseQuery && baseQuery.length > 2) || variantBaseMatch) {
+        derivedScore += 0.42;
         nameMatch = true;
       } else if (
         cStemmed.startsWith(qStemmed) ||
@@ -92,8 +106,17 @@ export class EntityResolutionService {
     derivedScore += typeEval.scoreBonus;
     typeMatch = typeEval.isCompatible;
 
+    // Candidate Compatibility Firewall:
+    // If context indicates dining/place and candidate type is incompatible,
+    // do not allow it to achieve a passing score
+    const isDining = context?.categoryHint === 'dining' || context?.categoryHint === 'restaurant' || context?.categoryHint === 'place';
+    if (isDining && !typeEval.isCompatible) {
+      derivedScore = Math.min(derivedScore, 0.35);
+    }
+
     // 3. Location / Context Compatibility (Weight: 0.15)
-    if (context?.location && isLocationMatch(candidate, context.location)) {
+    const loc = context?.location || extractedLocation;
+    if (loc && (isLocationMatch(candidate, loc) || (extractedLocation && isLocationMatch(candidate, extractedLocation)))) {
       derivedScore += 0.15;
       locationMatch = true;
     }
@@ -151,14 +174,43 @@ export class EntityResolutionService {
     }
 
     // Retrieve candidates from server-side Qloo client
-    logger.info(`Resolving concept "${trimmedQuery}" with Qloo Hackathon API...`);
-    let rawCandidates = await this.client.searchCandidates(trimmedQuery, { take: 10 });
+    // Normalize candidate and generate controlled search variants
+    const norm = normalizeCandidateSearch(trimmedQuery, context?.categoryHint, context?.location);
+    const effectiveCategoryHint = context?.categoryHint || norm.inferredCategory;
+    const effectiveLocation = context?.location || norm.extractedLocation;
+    const searchVariants = norm.candidateSearchNames.length > 0 ? norm.candidateSearchNames : [trimmedQuery];
 
-    // If query contains diacritics, accents, or plurals, also query normalized form to maximize Qloo candidate recall
-    const normalizedSearch = stripPluralSuffix(normalizeDiacritics(trimmedQuery));
-    if (normalizedSearch !== trimmedQuery.toLowerCase() && normalizedSearch.length >= 3) {
-      const extraCandidates = await this.client.searchCandidates(normalizedSearch, { take: 10 }).catch(() => []);
-      rawCandidates = CandidateNormalizer.deduplicate([...rawCandidates, ...extraCandidates]);
+    const effectiveContext: EntityResolutionContext = {
+      ...context,
+      categoryHint: effectiveCategoryHint,
+      location: effectiveLocation
+    };
+
+    logger.info(`Resolving concept "${trimmedQuery}" (variants: ${searchVariants.join(' | ')}) with Qloo Hackathon API...`);
+    let rawCandidates: NormalizedCandidate[] = [];
+
+    // Query controlled variants sequentially with bounded early exit
+    for (const variant of searchVariants) {
+      const candidates = await this.client.searchCandidates(variant, { take: 10 }).catch(() => []);
+      if (candidates.length > 0) {
+        rawCandidates = CandidateNormalizer.deduplicate([...rawCandidates, ...candidates]);
+        const earlyScored = rawCandidates.map((c) =>
+          this.scoreCandidate(c, normalizedQuery, effectiveContext, searchVariants, norm.extractedLocation)
+        );
+        const topEarly = earlyScored.sort((a, b) => b.derivedScore - a.derivedScore)[0];
+        if (topEarly && topEarly.derivedScore >= 0.70 && topEarly.typeMatch) {
+          break; // Bounded early exit
+        }
+      }
+    }
+
+    // If query contains diacritics, accents, or plurals, also query normalized form to maximize Qloo candidate recall if still empty
+    if (rawCandidates.length === 0) {
+      const normalizedSearch = stripPluralSuffix(normalizeDiacritics(trimmedQuery));
+      if (normalizedSearch !== trimmedQuery.toLowerCase() && normalizedSearch.length >= 3) {
+        const extraCandidates = await this.client.searchCandidates(normalizedSearch, { take: 10 }).catch(() => []);
+        rawCandidates = CandidateNormalizer.deduplicate([...rawCandidates, ...extraCandidates]);
+      }
     }
 
     if (rawCandidates.length === 0) {
@@ -182,7 +234,7 @@ export class EntityResolutionService {
 
     // Score all candidates deterministically
     const scored = rawCandidates
-      .map((c) => this.scoreCandidate(c, normalizedQuery, context))
+      .map((c) => this.scoreCandidate(c, normalizedQuery, effectiveContext, searchVariants, norm.extractedLocation))
       .sort((a, b) => b.derivedScore - a.derivedScore);
 
     const top = scored[0];

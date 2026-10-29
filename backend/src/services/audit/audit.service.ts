@@ -566,7 +566,7 @@ export class CulturalGroundingAuditEngine {
       constraintCompliance.weightedScore +
       evidenceCompleteness.weightedScore;
 
-    const overallScore = Math.max(0, Math.min(100, Math.round(rawOverall)));
+    let overallScore = Math.max(0, Math.min(100, Math.round(rawOverall)));
 
     // Deterministic decision bands
     let decision: AuditDecision;
@@ -580,8 +580,9 @@ export class CulturalGroundingAuditEngine {
       decision = {
         status: 'insufficient_evidence',
         label: 'Insufficient Qloo Evidence',
-        explanation:
-          'Abstained from conclusive cultural audit due to incomplete entity resolution or lack of empirical Qloo signals. No unsupported conclusions made.'
+        explanation: envelope.resolution.status === 'ambiguous'
+          ? 'Multiple ambiguous Qloo candidates match; resolution safely abstained.'
+          : 'Abstained from conclusive cultural audit due to incomplete entity resolution or lack of empirical Qloo signals. No unsupported conclusions made.'
       };
     } else if (overallScore >= 80) {
       decision = {
@@ -680,58 +681,127 @@ export class CulturalGroundingAuditEngine {
     }
 
     const n = itemAudits.length;
-    const sumOverall = itemAudits.reduce((acc, it) => acc + it.overallScore, 0);
-    const overallScore = Math.round(sumOverall / n);
-
-    const avgAlignment = Math.round(
-      itemAudits.reduce((acc, it) => acc + it.dimensions.culturalAlignment.score, 0) / n
+    // Verified items: successfully resolved items with empirical Qloo evidence
+    const verifiedItemAudits = itemAudits.filter(
+      (it) => it.decision.status !== 'insufficient_evidence'
     );
-    const avgRelevance = Math.round(
-      itemAudits.reduce((acc, it) => acc + it.dimensions.contextualRelevance.score, 0) / n
-    );
-    const avgConstraints = Math.round(
-      itemAudits.reduce((acc, it) => acc + it.dimensions.constraintCompliance.score, 0) / n
-    );
-    const avgCompleteness = Math.round(
-      itemAudits.reduce((acc, it) => acc + it.dimensions.evidenceCompleteness.score, 0) / n
-    );
+    const verifiedCount = verifiedItemAudits.length;
+    const insufficientCount = n - verifiedCount;
 
     let supportedCount = 0;
     let inferredCount = 0;
     let unverifiedCount = 0;
-    let insufficientCount = 0;
 
     itemAudits.forEach((it) => {
       if (it.decision.status === 'supported') supportedCount++;
       else if (it.decision.status === 'inferred') inferredCount++;
       else if (it.decision.status === 'unverified') unverifiedCount++;
-      else insufficientCount++;
     });
 
-    let overallDecision: AuditDecision;
-    if (insufficientCount === n) {
-      overallDecision = {
-        status: 'insufficient_evidence',
-        label: 'Insufficient Qloo Evidence',
-        explanation: 'All recommendation items lacked sufficient Qloo evidence or could not be reliably resolved.'
+    // Single recommendation: preserve exact item audit score and decision
+    if (n === 1) {
+      const single = itemAudits[0];
+      return {
+        overallScore: single.overallScore,
+        confidence: single.dimensions.evidenceCompleteness.score,
+        decision: single.decision,
+        dimensionsSummary: {
+          culturalAlignment: single.dimensions.culturalAlignment.score,
+          contextualRelevance: single.dimensions.contextualRelevance.score,
+          constraintCompliance: single.dimensions.constraintCompliance.score,
+          evidenceCompleteness: single.dimensions.evidenceCompleteness.score
+        },
+        totalItemsAudited: 1,
+        verifiedItemsCount: verifiedCount,
+        itemsSummary: {
+          supportedCount,
+          inferredCount,
+          unverifiedCount,
+          insufficientCount
+        },
+        provenance: {
+          source: 'tasteaudit',
+          operation: 'aggregate_cultural_audit',
+          correlationId: `agg_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+          auditedAt: new Date().toISOString()
+        }
       };
-    } else if (overallScore >= 80 && supportedCount >= Math.ceil(n / 2)) {
+    }
+
+    // If no candidates can be resolved, do not manufacture a numerical score
+    if (verifiedCount === 0) {
+      return {
+        overallScore: 0,
+        confidence: 0,
+        decision: {
+          status: 'insufficient_evidence',
+          label: 'Insufficient Qloo Evidence',
+          explanation: `0 of ${n} recommendations could be verified through Qloo. Abstained from conclusive cultural audit without empirical signals.`
+        },
+        dimensionsSummary: {
+          culturalAlignment: 0,
+          contextualRelevance: 0,
+          constraintCompliance: 0,
+          evidenceCompleteness: 0
+        },
+        totalItemsAudited: n,
+        verifiedItemsCount: 0,
+        itemsSummary: {
+          supportedCount: 0,
+          inferredCount: 0,
+          unverifiedCount: 0,
+          insufficientCount: n
+        },
+        provenance: {
+          source: 'tasteaudit',
+          operation: 'aggregate_cultural_audit',
+          correlationId: `agg_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+          auditedAt: new Date().toISOString()
+        }
+      };
+    }
+
+    // Deterministic aggregation strictly based on verified candidates
+    const sumOverall = verifiedItemAudits.reduce((acc, it) => acc + it.overallScore, 0);
+    const overallScore = Math.round(sumOverall / verifiedCount);
+
+    const avgAlignment = Math.round(
+      verifiedItemAudits.reduce((acc, it) => acc + it.dimensions.culturalAlignment.score, 0) / verifiedCount
+    );
+    const avgRelevance = Math.round(
+      verifiedItemAudits.reduce((acc, it) => acc + it.dimensions.contextualRelevance.score, 0) / verifiedCount
+    );
+    const avgConstraints = Math.round(
+      verifiedItemAudits.reduce((acc, it) => acc + it.dimensions.constraintCompliance.score, 0) / verifiedCount
+    );
+    const avgCompleteness = Math.round(
+      verifiedItemAudits.reduce((acc, it) => acc + it.dimensions.evidenceCompleteness.score, 0) / verifiedCount
+    );
+
+    let overallDecision: AuditDecision;
+    if (overallScore >= 80 && supportedCount >= Math.ceil(verifiedCount / 2)) {
       overallDecision = {
         status: 'supported',
         label: 'Culturally Grounded (Supported)',
-        explanation: `Recommendation set demonstrates strong cultural grounding (${overallScore}/100) with verified Qloo taste graph evidence.`
+        explanation: n > 1
+          ? `${verifiedCount} of ${n} recommendations verified; strong cultural grounding (${overallScore}/100) supported by Qloo taste graph.`
+          : `Recommendation demonstrates strong cultural grounding (${overallScore}/100) with verified Qloo taste graph evidence.`
       };
     } else if (overallScore >= 60) {
       overallDecision = {
         status: 'inferred',
         label: 'Partially Grounded (Needs Review)',
-        explanation: `Recommendation set shows moderate cultural grounding (${overallScore}/100); ${inferredCount + insufficientCount} item(s) require review.`
+        explanation: n > 1
+          ? `${verifiedCount} of ${n} recommendations verified; moderate cultural grounding (${overallScore}/100).`
+          : `Recommendation shows moderate cultural grounding (${overallScore}/100); some context or constraints remain unverified.`
       };
     } else {
       overallDecision = {
         status: 'unverified',
         label: 'Weak Grounding (Unverified)',
-        explanation: `Recommendation set exhibits low cultural alignment (${overallScore}/100) against requested context.`
+        explanation: n > 1
+          ? `${verifiedCount} of ${n} recommendations verified; low cultural alignment (${overallScore}/100) against requested context.`
+          : `Recommendation exhibits low cultural alignment (${overallScore}/100) against requested context.`
       };
     }
 
@@ -746,6 +816,7 @@ export class CulturalGroundingAuditEngine {
         evidenceCompleteness: avgCompleteness
       },
       totalItemsAudited: n,
+      verifiedItemsCount: verifiedCount,
       itemsSummary: {
         supportedCount,
         inferredCount,

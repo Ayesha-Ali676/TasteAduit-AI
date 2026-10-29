@@ -57,12 +57,14 @@ export function buildAgentUserPrompt(params: AgentPromptContext): string {
       affinityValue: c.affinityValue
     }));
 
-    return {
-      itemId: env.item.id,
-      itemName: env.item.name,
-      overallScore: audit ? audit.overallScore : 'Unaudited',
-      decisionStatus: audit?.decision.status || 'unknown',
-      decisionLabel: audit?.decision.label || 'unknown',
+      const isAbstained = !audit || audit.decision.status === 'insufficient_evidence' || env.resolution.status !== 'resolved';
+      return {
+        itemId: env.item.id,
+        itemName: env.item.name,
+        description: env.item.description || undefined,
+        overallScore: isAbstained ? 'N/A' : audit.overallScore,
+        decisionStatus: env.resolution.status === 'ambiguous' ? 'ambiguous' : (audit?.decision.status || 'unknown'),
+        decisionLabel: env.resolution.status === 'ambiguous' ? 'Ambiguous Qloo Entity' : (audit?.decision.label || 'unknown'),
       constraintStatus: audit?.dimensions.constraintCompliance.classification || 'unknown',
       constraintReasons: audit?.dimensions.constraintCompliance.reasons || [],
       resolutionStatus: env.resolution.status,

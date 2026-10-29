@@ -25,11 +25,11 @@ export const Hero: React.FC = () => {
 
       {/* Workflow Pills */}
       <div className="flex items-center justify-center gap-2 sm:gap-3 text-xs sm:text-sm font-semibold tracking-wider text-sage-muted">
-        <span className="px-3 py-1 rounded-full bg-white border border-sage-mint text-sage-dark shadow-xs">
+        <span className="px-3 py-1 rounded-full bg-sage-mint border border-sage-soft text-sage-dark shadow-xs font-bold">
           PASTE
         </span>
         <ArrowRight className="w-3.5 h-3.5 text-sage" />
-        <span className="px-3 py-1 rounded-full bg-white border border-sage-mint text-sage-dark shadow-xs">
+        <span className="px-3 py-1 rounded-full bg-sage-mint border border-sage-soft text-sage-dark shadow-xs font-bold">
           AUDIT
         </span>
         <ArrowRight className="w-3.5 h-3.5 text-sage" />

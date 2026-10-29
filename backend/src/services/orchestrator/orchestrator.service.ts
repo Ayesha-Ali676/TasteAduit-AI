@@ -67,12 +67,16 @@ export class TasteAuditOrchestrator {
     let insufficientEvidenceCount = 0;
     let unresolvedEvidenceCount = 0;
 
+    const effectiveLocation = input.location || parsed.location;
+    const effectiveAudience = input.audienceContext || parsed.audienceContext;
+    const effectiveConstraints = input.constraints && input.constraints.length > 0 ? input.constraints : parsed.constraints;
+
     for (const item of parsed.items) {
       const resolution = await this.resolutionSvc.resolve(item.name, {
         categoryHint: item.category,
-        location: input.location,
-        audience: input.audienceContext,
-        constraints: input.constraints,
+        location: effectiveLocation,
+        audience: effectiveAudience,
+        constraints: effectiveConstraints,
         isDiscovery: item.isDiscovery,
         discoveryIntent: item.discoveryIntent
       });

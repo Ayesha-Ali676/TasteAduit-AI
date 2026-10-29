@@ -41,7 +41,7 @@ export function evaluateTypeCompatibility(
       (hint === 'music' && (typeLower.includes('artist') || typeLower.includes('genre:music') || typeLower.includes('album'))) ||
       (hint === 'artist' && typeLower.includes('artist')) ||
       (hint === 'movie' && (typeLower.includes('movie') || typeLower.includes('film'))) ||
-      (hint === 'place' && (typeLower.includes('place') || typeLower.includes('restaurant') || typeLower.includes('venue') || typeLower.includes('cafe'))) ||
+      ((hint === 'place' || hint === 'dining' || hint === 'restaurant' || hint === 'food' || hint === 'cafe') && (typeLower.includes('place') || typeLower.includes('restaurant') || typeLower.includes('venue') || typeLower.includes('cafe') || typeLower.includes('bar') || (typeLower.includes('brand') && tagsLower.some((t) => DOMAIN_PATTERNS.place.test(t))))) ||
       (hint === 'book' && typeLower.includes('book'));
 
     if (matchesHint) {
