@@ -171,7 +171,8 @@ export class TasteAuditOrchestrator {
         item,
         resolution,
         evidence,
-        audit: itemAudit
+        audit: itemAudit,
+        initialAudit: itemAudit
       });
     }
 

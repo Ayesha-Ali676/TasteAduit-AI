@@ -71,16 +71,103 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
     return Array.from(new Set(signalTags)).slice(0, limit);
   };
 
-  // Determine scores strictly from backend response
+  /**
+   * Dynamic layout density configurations derived purely from candidate count.
+   * Ensures recommendation cards auto-fit the panel height on desktop while
+   * maintaining readability and touch targets on mobile/narrow screens.
+   */
+  const getDynamicDensity = (count: number) => {
+    if (count <= 1) {
+      return {
+        desktopGridRows: 'minmax(0, auto)',
+        gap: '0.75rem',
+        cardPadding: 'p-4 sm:p-5',
+        imageSize: 'w-16 h-16 sm:w-20 sm:h-20',
+        titleSize: 'text-sm sm:text-base font-bold',
+        badgeSize: 'text-[11px] font-bold px-2.5 py-0.5',
+        tagCount: 4,
+        tagPadding: 'px-2 py-0.5 text-[11px]',
+        btnSize: 'text-xs font-bold',
+        isScrollable: false,
+      };
+    } else if (count <= 3) {
+      // 2-3 recommendations: expand comfortably to fill available panel height
+      return {
+        desktopGridRows: `repeat(${count}, minmax(0, 1fr))`,
+        gap: count === 2 ? '0.875rem' : '0.625rem',
+        cardPadding: count === 2 ? 'p-4 sm:p-4.5' : 'p-3 sm:p-3.5',
+        imageSize: count === 2 ? 'w-16 h-16 sm:w-18 sm:h-18' : 'w-14 h-14 sm:w-16 sm:h-16',
+        titleSize: 'text-sm sm:text-base font-bold',
+        badgeSize: 'text-[11px] font-bold px-2 py-0.5',
+        tagCount: 3,
+        tagPadding: 'px-1.5 py-0.5 text-[10px]',
+        btnSize: 'text-xs font-bold',
+        isScrollable: false,
+      };
+    } else if (count === 4) {
+      // 4 recommendations: moderately more compact, all 4 fit evenly
+      return {
+        desktopGridRows: 'repeat(4, minmax(0, 1fr))',
+        gap: '0.5rem',
+        cardPadding: 'p-2.5 sm:p-3',
+        imageSize: 'w-12 h-12 sm:w-14 sm:h-14',
+        titleSize: 'text-xs sm:text-sm font-bold',
+        badgeSize: 'text-[10px] font-bold px-1.5 py-0.5',
+        tagCount: 2,
+        tagPadding: 'px-1.5 py-0.2 text-[10px]',
+        btnSize: 'text-xs font-bold',
+        isScrollable: false,
+      };
+    } else if (count === 5) {
+      // 5 recommendations: compact fit, clean, never microscopic
+      return {
+        desktopGridRows: 'repeat(5, minmax(0, 1fr))',
+        gap: '0.375rem',
+        cardPadding: 'p-2 sm:p-2.5',
+        imageSize: 'w-11 h-11 sm:w-12 sm:h-12',
+        titleSize: 'text-xs sm:text-xs font-bold',
+        badgeSize: 'text-[9.5px] font-bold px-1.5 py-0.2',
+        tagCount: 2,
+        tagPadding: 'px-1 py-0.2 text-[9px]',
+        btnSize: 'text-[11px] font-bold',
+        isScrollable: false,
+      };
+    } else {
+      // > 5 recommendations: preserve usability with min-height and graceful scroll
+      return {
+        desktopGridRows: `repeat(${count}, minmax(76px, auto))`,
+        gap: '0.375rem',
+        cardPadding: 'p-2 sm:p-2.5',
+        imageSize: 'w-11 h-11 sm:w-12 sm:h-12',
+        titleSize: 'text-xs font-bold',
+        badgeSize: 'text-[9.5px] font-bold px-1.5 py-0.2',
+        tagCount: 1,
+        tagPadding: 'px-1 py-0.2 text-[9px]',
+        btnSize: 'text-[11px] font-bold',
+        isScrollable: true,
+      };
+    }
+  };
+
+  // Determine scores strictly from backend response & candidate baselines
+  const verifiedInitialScores = items
+    .filter((it) => it.resolution?.status === 'resolved' && (it.initialAudit ?? it.audit) && (it.initialAudit ?? it.audit)?.decision.status !== 'insufficient_evidence')
+    .map((env) => (env.initialAudit ?? env.audit)!.overallScore);
+
+  const candidateBaselineAvg = verifiedInitialScores.length > 0
+    ? Math.round(verifiedInitialScores.reduce((a, b) => a + b, 0) / verifiedInitialScores.length)
+    : 0;
+
   const initialScore = repairReport
     ? Math.round(repairReport.averageScoreBefore)
-    : (agentTrace?.initialOverallScore ?? auditReport?.overallScore ?? 0);
+    : (agentTrace?.initialOverallScore ?? (candidateBaselineAvg > 0 ? candidateBaselineAvg : (auditReport?.overallScore ?? 0)));
 
   const finalScore = repairReport && repairReport.averageScoreAfter > 0
     ? Math.round(repairReport.averageScoreAfter)
-    : (agentTrace?.finalOverallScore ?? auditReport?.overallScore ?? 0);
+    : (agentTrace?.finalOverallScore ?? (auditReport?.overallScore ?? 0));
 
-  const scoreDelta = agentTrace?.netScoreImprovement ?? (repairReport ? Math.round(repairReport.netImprovement) : 0);
+  // Score delta must ALWAYS strictly equal finalScore - initialScore
+  const scoreDelta = finalScore - initialScore;
 
   const dims = auditReport?.dimensionsSummary || {
     culturalAlignment: 0,
@@ -90,10 +177,37 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
   };
 
   const repairedItems = repairReport?.repairedItems || [];
-  const hasAttemptedRepair = repairedItems.length > 0 && repairedItems.some(r => !!r.selectedCandidate);
-  const hasSuccessfulRepair = repairedItems.length > 0 && scoreDelta > 0 && repairedItems.some(r => r.verifiedImprovement || (r.scoreDelta ?? 0) > 0);
+  const hasAttemptedRepair =
+    (repairedItems.length > 0 && repairedItems.some(r => !!r.selectedCandidate)) ||
+    (agentTrace?.events?.some(e => e.decision === 'REPAIR') ?? false);
+
+  const hasSuccessfulRepair =
+    (repairedItems.length > 0 && scoreDelta > 0 && repairedItems.some(r => r.verifiedImprovement || (r.scoreDelta ?? 0) > 0)) ||
+    (scoreDelta > 0 && (agentTrace?.events?.some(e => e.decision === 'REPAIR' && (e.scoreDelta ?? 0) > 0) ?? false));
+
+  const hasEvidenceStrengthened =
+    !hasSuccessfulRepair &&
+    scoreDelta > 0 &&
+    (agentTrace?.events?.some(e => e.decision === 'MORE_EVIDENCE' && (e.scoreDelta ?? 0) > 0) ?? false);
+
   const isZeroImprovementRepair = hasAttemptedRepair && scoreDelta <= 0;
+
+  const isZeroImprovementEvidence =
+    !hasSuccessfulRepair &&
+    !hasAttemptedRepair &&
+    scoreDelta <= 0 &&
+    (agentTrace?.events?.some(e => e.decision === 'MORE_EVIDENCE') ?? false);
+
   const isProviderFailure = agentTrace?.finalStopReason === 'provider_failure' && !hasSuccessfulRepair;
+
+  const isAlreadyGrounded =
+    scoreDelta === 0 &&
+    !hasAttemptedRepair &&
+    !hasEvidenceStrengthened &&
+    !isZeroImprovementEvidence &&
+    !isProviderFailure &&
+    ((agentTrace?.terminalState === 'ACCEPTED') || auditReport?.decision.status === 'supported');
+
   const isCulturallyVerified =
     (agentTrace?.terminalState === 'ACCEPTED' || auditReport?.decision.status === 'supported') &&
     finalScore >= 70;
@@ -107,6 +221,13 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
         dotClass: 'bg-emerald-500',
         explanation: 'Recommendations were successfully repaired with culturally grounded alternatives from the Qloo taste graph.'
       };
+    } else if (hasEvidenceStrengthened) {
+      return {
+        label: 'Evidence strengthened',
+        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        dotClass: 'bg-emerald-500',
+        explanation: 'Cultural grounding was verified and strengthened with additional empirical evidence from the Qloo taste graph.'
+      };
     } else if (isZeroImprovementRepair) {
       return {
         label: 'No improvement — original grounded result preserved',
@@ -114,12 +235,26 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
         dotClass: 'bg-amber-500',
         explanation: 'Repair candidate evaluated; deterministic re-audit found no improvement. Original grounded result preserved.'
       };
+    } else if (isZeroImprovementEvidence) {
+      return {
+        label: 'Additional evidence found — no score improvement',
+        badgeClass: 'bg-blue-50 text-blue-800 border-blue-200',
+        dotClass: 'bg-blue-500',
+        explanation: 'Additional Qloo evidence was retrieved, confirming cultural context with no change to the baseline score.'
+      };
     } else if (isProviderFailure) {
       return {
         label: 'Provider unavailable — deterministic audit preserved',
         badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
         dotClass: 'bg-amber-500',
         explanation: 'AI reasoning layer was unavailable; deterministic Qloo cultural audit preserved without fabrication.'
+      };
+    } else if (isAlreadyGrounded) {
+      return {
+        label: 'Already grounded',
+        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        dotClass: 'bg-emerald-500',
+        explanation: 'Recommendations already demonstrate strong cultural grounding against the Qloo taste graph without modification.'
       };
     } else if (score >= 80 && agentTrace?.terminalState === 'ACCEPTED') {
       return {
@@ -246,17 +381,27 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
               </div>
             )}
 
-            {/* Score Delta if repair occurred */}
+            {/* Score Delta if action occurred */}
             {scoreDelta > 0 ? (
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-sage-mint/80 border border-sage-soft text-sage-dark text-xs font-bold shadow-xs">
                 <TrendingUp className="w-3.5 h-3.5 text-sage" />
-                <span>Repaired successfully (+{scoreDelta})</span>
+                <span>{hasSuccessfulRepair ? `Repaired successfully (+${scoreDelta})` : `Evidence strengthened (+${scoreDelta})`}</span>
                 <span className="text-sage-muted font-normal">({initialScore} → {finalScore})</span>
               </div>
             ) : isZeroImprovementRepair ? (
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold shadow-xs">
                 <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
                 <span>{initialScore} → {finalScore} — No improvement — original grounded result preserved</span>
+              </div>
+            ) : isZeroImprovementEvidence ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold shadow-xs">
+                <Search className="w-3.5 h-3.5 text-blue-600" />
+                <span>Additional evidence found — no score improvement ({initialScore} → {finalScore})</span>
+              </div>
+            ) : isAlreadyGrounded ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-sage-mint/80 border border-sage-soft text-sage-dark text-xs font-bold shadow-xs">
+                <CheckCircle2 className="w-3.5 h-3.5 text-sage" />
+                <span>Already grounded ({finalScore}/100)</span>
               </div>
             ) : null}
 
@@ -365,7 +510,7 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                   Original AI Recommendation
                 </span>
                 <span className="text-sm font-bold text-sage-muted">
-                  Audit Baseline: {initialScore} / 100
+                  Pre-grounding baseline: {initialScore} / 100
                 </span>
               </div>
 
@@ -401,7 +546,7 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                 </span>
                 <div className="space-y-2">
                   {items.map((env, idx) => {
-                    const audit = env.audit;
+                    const audit = env.initialAudit ?? env.audit;
                     const reasons = audit?.dimensions.constraintCompliance.reasons || [];
                     const failedReasons = reasons.filter(r => r.includes('[FAIL]') || r.includes('[UNVERIFIED]'));
 
@@ -412,7 +557,9 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                           <div className="font-bold text-sage-dark flex items-center justify-between">
                             <span className="truncate">{env.item.name}</span>
                             <span className="text-xs font-bold text-amber-700 shrink-0">
-                              Audit Baseline: {audit?.overallScore ?? initialScore}/100
+                              {env.resolution?.status !== 'resolved' || audit?.decision.status === 'insufficient_evidence'
+                                ? `Pre-grounding baseline: ${audit?.overallScore ?? 0}/100`
+                                : `Pre-grounding baseline: ${audit?.overallScore ?? initialScore}/100`}
                             </span>
                           </div>
                           <p className="text-sage-muted text-[11px] leading-relaxed line-clamp-2">
@@ -434,23 +581,29 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
           </div>
 
           {/* RIGHT-HAND RESULT CARD (AFTER / AUDIT OUTCOME) */}
-          <div className={`rounded-3xl border-2 p-6 sm:p-7 flex flex-col justify-between space-y-5 shadow-sage-soft relative overflow-hidden ${
+          <div className={`rounded-3xl border-2 p-6 sm:p-7 flex flex-col shadow-sage-soft relative overflow-hidden ${
             hasSuccessfulRepair || (isCulturallyVerified && !isZeroImprovementRepair)
               ? 'bg-[#EAF4EB] border-sage-soft'
               : 'bg-[#FAFDF9] border-amber-200/80'
           }`}>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-sage-soft/70">
+            {/* Top Header Bar */}
+            <div className="flex items-center justify-between pb-3 border-b border-sage-soft/70 shrink-0 mb-3.5">
                 <span className="text-xs font-bold uppercase tracking-wider text-sage-dark flex items-center gap-1.5">
-                  {hasSuccessfulRepair || (isCulturallyVerified && !isZeroImprovementRepair) ? (
+                  {hasSuccessfulRepair || hasEvidenceStrengthened || (isCulturallyVerified && !isZeroImprovementRepair) ? (
                     <CheckCircle2 className="w-4 h-4 text-sage" />
                   ) : (
                     <AlertTriangle className="w-4 h-4 text-amber-600" />
                   )}
                   {hasSuccessfulRepair
                     ? 'Repaired successfully'
+                    : hasEvidenceStrengthened
+                    ? 'Evidence strengthened'
                     : isZeroImprovementRepair
                     ? 'No improvement — original grounded result preserved'
+                    : isZeroImprovementEvidence
+                    ? 'Additional evidence found — no score improvement'
+                    : isAlreadyGrounded
+                    ? 'Already grounded'
                     : isCulturallyVerified
                     ? 'Culturally Grounded Result'
                     : 'Insufficient Evidence'}
@@ -461,19 +614,29 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                   </span>
                   {scoreDelta > 0 ? (
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-sage-dark text-white">
-                      +{scoreDelta} Repaired successfully
+                      +{scoreDelta} {hasSuccessfulRepair ? 'Repaired successfully' : 'Evidence strengthened'}
                     </span>
                   ) : isZeroImprovementRepair ? (
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
                       {initialScore} → {finalScore} — No improvement
                     </span>
+                  ) : isZeroImprovementEvidence ? (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200">
+                      {initialScore} → {finalScore} — No score change
+                    </span>
+                  ) : isAlreadyGrounded ? (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-sage-mint text-sage-dark border border-sage-soft">
+                      Already grounded
+                    </span>
                   ) : null}
                 </div>
               </div>
 
+            {/* Dynamic Content Area: takes available space between header and footer */}
+            <div className="flex-1 flex flex-col min-h-0">
               {/* Repaired Entities (Shown ONLY if repair actually succeeded) */}
               {hasSuccessfulRepair && repairedItems.length > 0 ? (
-                <div className="space-y-4">
+                <div className="flex-1 flex flex-col min-h-0 space-y-3.5 overflow-y-auto pr-0.5">
                   {repairedItems.map((rep, idx) => {
                     const cand = rep.selectedCandidate;
                     const afterItemScore = rep.afterAudit?.overallScore ?? rep.beforeAudit.overallScore;
@@ -574,118 +737,129 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                 </div>
               ) : (
                 (() => {
-                  const verifiedEnv = items.find(
-                    it => it.resolution.status === 'resolved' && it.resolution.resolvedEntity?.imageUrl
-                  );
-                  const verifiedEntity = verifiedEnv?.resolution.resolvedEntity;
-                  const verifiedImageUrl = verifiedEntity?.imageUrl;
-                  const topTags = verifiedEnv ? getTopVerifiedTags(verifiedEnv, 5) : [];
+                  const verifiedCount = items.filter(
+                    it => it.resolution?.status === 'resolved' && it.audit && it.audit.decision.status !== 'insufficient_evidence'
+                  ).length;
 
-                  return verifiedImageUrl && verifiedEntity ? (
-                    <div className="rounded-2xl bg-white border border-sage-soft overflow-hidden shadow-xs space-y-0">
-                      {/* Large Qloo Visual Hero */}
-                      <div
-                        className="relative w-full h-48 sm:h-56 bg-sage-soft/20 cursor-pointer group overflow-hidden border-b border-sage-soft/70"
-                        onClick={() => openLightbox(verifiedImageUrl, verifiedEntity.name, verifiedEntity.type)}
-                        title="Click to view full size image"
-                      >
-                        <img
-                          src={verifiedImageUrl}
-                          alt={verifiedEntity.name}
-                          loading="lazy"
-                          onError={(e) => {
-                            (e.currentTarget as HTMLElement).style.display = 'none';
-                          }}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3.5">
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-white/90 text-sage-dark shadow-sm">
-                            <ZoomIn className="w-3.5 h-3.5 text-sage" /> Click to enlarge
-                          </span>
-                          <span className="text-[11px] text-white/90 bg-black/40 px-2 py-0.5 rounded-full">
-                            Qloo CDN
-                          </span>
-                        </div>
-                      </div>
+                  // ALL CANDIDATE GROUNDED SETS (1, 2, 3, 4, 5+ recommendations)
+                  if (items.length > 0) {
+                    const density = getDynamicDensity(items.length);
 
-                      {/* Details */}
-                      <div className="p-5 space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <h4 className="text-lg font-bold text-sage-dark tracking-tight">
-                              {verifiedEntity.name}
-                            </h4>
-                            <div className="flex items-center gap-2 pt-0.5 text-xs text-sage-muted">
-                              <span className={`font-semibold px-2.5 py-0.5 rounded-full border ${statusInfo.badgeClass}`}>
-                                {finalScore}/100 &bull; {statusInfo.label}
-                              </span>
-                            </div>
-                          </div>
-
-                          {verifiedEnv && (
-                            <button
-                              type="button"
-                              onClick={() => onSelectEntityForEvidence(verifiedEnv)}
-                              className="inline-flex items-center gap-1 text-xs font-bold text-sage-dark hover:text-sage transition cursor-pointer shrink-0 pt-1"
-                            >
-                              <span>View evidence</span>
-                              <ArrowRight className="w-3.5 h-3.5 text-sage" />
-                            </button>
-                          )}
-                        </div>
-
-                        {/* Verified Cultural Signals if culturally supported */}
-                        {topTags.length > 0 && isCulturallyVerified && (
-                          <div className="space-y-1.5 pt-1 border-t border-sage-mint/60">
-                            <span className="text-[11px] font-bold text-sage-muted uppercase tracking-wider block">
-                              Verified Cultural Signals (Why this recommendation passed):
+                    return (
+                      <div className="flex-1 flex flex-col min-h-0">
+                        {/* Aggregate summary badge */}
+                        <div className="p-3 sm:p-3.5 rounded-2xl bg-white border border-sage-soft flex items-center justify-between gap-2 shadow-xs shrink-0 mb-3">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span className="text-xs font-bold text-sage-dark">
+                              {verifiedCount === items.length
+                                ? `All ${verifiedCount} of ${items.length} ${items.length === 1 ? 'recommendation' : 'recommendations'} culturally grounded`
+                                : `${verifiedCount} of ${items.length} ${items.length === 1 ? 'recommendation' : 'recommendations'} culturally grounded`}
                             </span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {topTags.map((tag, tIdx) => (
-                                <span
-                                  key={tIdx}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#FAFDF9] border border-sage-mint text-xs font-medium text-sage-dark"
-                                >
-                                  <Check className="w-3 h-3 text-emerald-600" />
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
                           </div>
-                        )}
-
-                        {/* Zero improvement or unverified notice */}
-                        {isZeroImprovementRepair ? (
-                          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
-                            <div className="font-bold flex items-center gap-1.5">
-                              <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                              <span>No improvement ({initialScore} → {finalScore})</span>
-                            </div>
-                            <p className="leading-relaxed">
-                              A repair candidate was evaluated, but deterministic re-audit found no score improvement. The original grounded entity was preserved without speculative replacement.
-                            </p>
-                          </div>
-                        ) : !isCulturallyVerified ? (
-                          <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
-                            {agentTrace?.events?.slice().reverse().find(e => e.decision === 'STOP')?.reasoning ||
-                             auditReport?.decision.explanation ||
-                             'Entity recognized in Qloo, but failed cultural constraints or threshold.'}
-                          </p>
-                        ) : null}
-
-                        <div className="pt-2 border-t border-sage-mint/40 flex items-center justify-between text-[11px] text-sage-muted">
-                          <span>Visual reference &bull; Qloo verified metadata</span>
-                          <span className="italic">
-                            {isZeroImprovementRepair
-                              ? 'Original grounded result preserved'
-                              : isCulturallyVerified
-                              ? 'Grounding verified against taste graph'
-                              : 'Cultural baseline preserved'}
+                          <span className="text-xs font-bold text-sage-dark bg-sage-mint/60 border border-sage-soft px-2.5 py-0.5 rounded-full shrink-0">
+                            Aggregate: ${finalScore}/100
                           </span>
                         </div>
+
+                        {/* Recommendation list: dynamically auto-fits remaining vertical space */}
+                        <div
+                          className={`flex-1 min-h-0 dynamic-recommendation-grid ${
+                            density.isScrollable ? 'overflow-y-auto pr-1' : ''
+                          }`}
+                          style={{
+                            '--item-count': items.length,
+                            '--grid-gap': density.gap,
+                            '--desktop-grid-rows': density.desktopGridRows,
+                          } as React.CSSProperties}
+                        >
+                          {items.map((env, idx) => {
+                            const res = env.resolution;
+                            const entity = res.resolvedEntity;
+                            const imgUrl = entity?.imageUrl;
+                            const itemScore = env.audit?.overallScore ?? 0;
+                            const topTags = getTopVerifiedTags(env, density.tagCount);
+                            const isResolved = res.status === 'resolved';
+
+                            return (
+                              <div
+                                key={idx}
+                                className={`${density.cardPadding} rounded-2xl bg-white border border-sage-soft shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 min-h-0 transition-all`}
+                              >
+                                <div className="flex items-center gap-3 min-w-0 flex-1">
+                                  {imgUrl ? (
+                                    <div
+                                      className={`relative ${density.imageSize} rounded-xl overflow-hidden border border-sage-mint bg-sage-soft/20 shadow-xs shrink-0 cursor-pointer group aspect-square`}
+                                      onClick={() => openLightbox(imgUrl, entity?.name || env.item.name, entity?.type)}
+                                      title="Click to enlarge"
+                                    >
+                                      <img
+                                        src={imgUrl}
+                                        alt={entity?.name || env.item.name}
+                                        loading="lazy"
+                                        onError={(e) => {
+                                          (e.currentTarget as HTMLElement).style.display = 'none';
+                                        }}
+                                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                                      />
+                                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <ZoomIn className="w-3.5 h-3.5 text-white" />
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className={`${density.imageSize} rounded-xl bg-sage-mint/50 border border-sage-soft flex items-center justify-center shrink-0 aspect-square`}>
+                                      <CheckCircle2 className="w-5 h-5 text-sage" />
+                                    </div>
+                                  )}
+
+                                  <div className="min-w-0 flex-1 space-y-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <strong className={`${density.titleSize} text-sage-dark truncate block`}>
+                                        {entity?.name || env.item.name}
+                                      </strong>
+                                      <span className={`${density.badgeSize} rounded-full border shrink-0 ${
+                                        isResolved
+                                          ? 'bg-sage-mint/80 text-sage-dark border-sage-soft'
+                                          : 'bg-gray-100 text-gray-700 border-gray-200'
+                                      }`}>
+                                        Verified Qloo grounding: ${itemScore}/100 &bull; ${isResolved ? 'SUPPORTED' : 'UNVERIFIED'}
+                                      </span>
+                                    </div>
+
+                                    {topTags.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {topTags.map((tag, tIdx) => (
+                                          <span
+                                            key={tIdx}
+                                            className={`inline-flex items-center gap-0.5 font-medium text-sage-dark bg-sage-mint/40 border border-sage-mint rounded ${density.tagPadding}`}
+                                          >
+                                            <Check className="w-2.5 h-2.5 text-emerald-600" />
+                                            {tag}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectEntityForEvidence(env)}
+                                  className={`${density.btnSize} text-sage-dark hover:text-sage flex items-center gap-1 transition cursor-pointer shrink-0 self-end sm:self-center`}
+                                >
+                                  <span>View evidence</span>
+                                  <ArrowRight className="w-3.5 h-3.5 text-sage" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ) : isCulturallyVerified ? (
+                    );
+                  }
+
+                  // Empty fallback if items array is empty
+                  return (
                     <div className="p-5 rounded-xl bg-white border border-sage-soft space-y-2 text-xs shadow-xs">
                       <div className="flex items-center gap-2 text-sage-dark font-bold text-sm">
                         <Check className="w-4 h-4 text-emerald-600" />
@@ -695,29 +869,12 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
                         The requested recommendations exhibit strong alignment with empirical Qloo taste signals without requiring candidate substitution.
                       </p>
                     </div>
-                  ) : (
-                    <div className="p-5 rounded-xl bg-white border border-amber-200 space-y-3 text-xs shadow-xs">
-                      <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
-                        <AlertTriangle className="w-4 h-4 text-amber-600" />
-                        <span>Insufficient Evidence</span>
-                      </div>
-                      <p className="text-sage-dark leading-relaxed">
-                        {agentTrace?.events?.slice().reverse().find(e => e.decision === 'STOP')?.reasoning ||
-                         auditReport?.decision.explanation ||
-                         'The recommendations could not be confidently validated against available cultural evidence in the Qloo taste graph.'}
-                      </p>
-                      {agentTrace?.finalStopReason && (
-                        <div className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 inline-block">
-                          Stop reason: {agentTrace.finalStopReason}
-                        </div>
-                      )}
-                    </div>
                   );
                 })()
               )}
             </div>
 
-            <p className="text-xs text-sage-dark font-medium italic pt-1">
+            <p className="text-xs text-sage-dark font-medium italic pt-3 shrink-0">
               {hasSuccessfulRepair
                 ? 'Evidence-backed alternative anchored to the Qloo taste intelligence graph.'
                 : isZeroImprovementRepair
@@ -813,7 +970,9 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
 
                       {evt.scoreAfter !== undefined && (
                         <span className="text-xs font-bold text-sage-dark">
-                          Score: {evt.scoreAfter}/100
+                          {evt.scoreBefore !== undefined && evt.scoreBefore !== evt.scoreAfter
+                            ? `Score: ${evt.scoreBefore} → ${evt.scoreAfter}/100`
+                            : `Score: ${evt.scoreAfter}/100`}
                         </span>
                       )}
                     </div>
@@ -849,9 +1008,17 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
 
                     {/* Action summary */}
                     {evt.actionPerformed?.action && (
-                      <div className="text-[11px] text-sage-muted pt-1 flex items-center gap-1.5">
+                      <div className="text-[11px] text-sage-muted pt-1 flex flex-wrap items-center gap-1.5">
                         <strong className="text-sage-dark font-medium">Action:</strong>
                         <span>{evt.actionPerformed.action}</span>
+                        {evt.targetItemName && (
+                          <span className="text-sage-dark font-semibold">
+                            on "{evt.targetItemName}"
+                            {evt.actionPerformed.targetScoreBefore !== undefined && evt.actionPerformed.targetScoreAfter !== undefined && (
+                              <span className="font-normal text-sage-muted"> ({evt.actionPerformed.targetScoreBefore} → {evt.actionPerformed.targetScoreAfter}/100)</span>
+                            )}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>

@@ -187,6 +187,9 @@ export interface AgentTraceEvent {
       name: string;
       type?: string;
     };
+    targetScoreBefore?: number;
+    targetScoreAfter?: number;
+    targetScoreDelta?: number;
   };
   scoreBefore?: number;
   scoreAfter?: number;
@@ -224,6 +227,7 @@ export interface ItemResolutionEnvelope {
   resolution: EntityResolutionResult;
   evidence?: NormalizedEvidenceResult;
   audit?: ItemAuditResult;
+  initialAudit?: ItemAuditResult;
   repair?: RepairItemResult;
 }
 

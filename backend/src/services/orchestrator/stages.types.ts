@@ -186,6 +186,7 @@ export interface ItemResolutionEnvelope {
   resolution: EntityResolutionResult;
   evidence?: NormalizedEvidenceResult;
   audit?: ItemAuditResult;
+  initialAudit?: ItemAuditResult;
   repair?: RepairItemResult;
 }
 

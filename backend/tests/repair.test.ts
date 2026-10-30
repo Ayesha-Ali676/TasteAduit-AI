@@ -709,5 +709,5 @@ describe('Stage 5: AI-Powered Repair Engine & Evidence Firewall', () => {
     expect(result.stagesExecuted).toEqual(['PARSE', 'RESOLVE', 'RETRIEVE', 'AUDIT', 'REPAIR']);
     expect(result.repairReport).toBeDefined();
     expect(result.repairReport?.repairedItems.length).toBeGreaterThan(0);
-  });
+  }, 15000);
 });

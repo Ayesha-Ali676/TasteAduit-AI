@@ -30,6 +30,9 @@ export interface AgentTraceEvent {
   actionPerformed?: {
     action: string;
     candidateSelected?: AgentVerifiedCandidateInfo;
+    targetScoreBefore?: number;
+    targetScoreAfter?: number;
+    targetScoreDelta?: number;
   };
   scoreBefore?: number;
   scoreAfter?: number;

@@ -484,24 +484,26 @@ export class TasteAuditAgentLoop {
         actionHistory.add(actionKey);
 
         // Execute Stage 5 Repair
-        const scoreBefore = targetEnvelope.audit ? targetEnvelope.audit.overallScore : currentAuditReport.overallScore;
+        const aggregateBefore = currentAuditReport.overallScore;
+        const targetScoreBefore = targetEnvelope.audit ? targetEnvelope.audit.overallScore : aggregateBefore;
 
         logger.info(`[AgentLoop] Executing Stage 5 Repair on "${targetEnvelope.item.name}"...`);
         const repairRes = await this.repairSvc.repairItem(targetEnvelope, evaluationContext);
         targetEnvelope.repair = repairRes;
         repairResults.push(repairRes);
 
-        let scoreAfter = scoreBefore;
-        let scoreDelta = 0;
+        let targetScoreAfter = targetScoreBefore;
+        let targetScoreDelta = 0;
 
         if (repairRes.status === 'repaired' && repairRes.repairedEnvelope) {
-          scoreAfter = repairRes.afterAudit ? repairRes.afterAudit.overallScore : scoreBefore;
-          scoreDelta = repairRes.scoreDelta ?? (scoreAfter - scoreBefore);
+          targetScoreAfter = repairRes.afterAudit ? repairRes.afterAudit.overallScore : targetScoreBefore;
+          targetScoreDelta = repairRes.scoreDelta ?? (targetScoreAfter - targetScoreBefore);
 
           // Only adopt repaired replacement into currentEnvelopes if score verified an improvement
-          if (scoreDelta > 0) {
+          if (targetScoreDelta > 0) {
             const targetIndex = currentEnvelopes.findIndex((e) => e.item.id === targetEnvelope.item.id);
             if (targetIndex !== -1) {
+              repairRes.repairedEnvelope.initialAudit = targetEnvelope.initialAudit ?? targetEnvelope.audit;
               currentEnvelopes[targetIndex] = repairRes.repairedEnvelope;
             }
           }
@@ -512,6 +514,9 @@ export class TasteAuditAgentLoop {
           currentEnvelopes.map((e) => e.audit!).filter(Boolean),
           input
         );
+
+        const aggregateAfter = currentAuditReport.overallScore;
+        const aggregateDelta = aggregateAfter - aggregateBefore;
 
         const candidateInfo: AgentVerifiedCandidateInfo | undefined = repairRes.selectedCandidate
           ? {
@@ -529,9 +534,9 @@ export class TasteAuditAgentLoop {
           : undefined;
 
         // Zero or negative score delta after REPAIR: safely stop loop without claiming false success
-        if (scoreDelta <= 0) {
+        if (targetScoreDelta <= 0 && aggregateDelta <= 0) {
           logger.warn(
-            `[AgentLoop] Repair on "${targetEnvelope.item.name}" yielded zero or negative improvement (${scoreDelta}). Stopping loop.`
+            `[AgentLoop] Repair on "${targetEnvelope.item.name}" yielded zero or negative improvement (${targetScoreDelta}). Stopping loop.`
           );
           addTraceEvent({
             iteration,
@@ -542,10 +547,13 @@ export class TasteAuditAgentLoop {
             reasoning: 'Repair attempted, but deterministic re-audit found no improvement. Original grounded result preserved.',
             actionPerformed: {
               action: 'no_improvement',
-              candidateSelected: candidateInfo
+              candidateSelected: candidateInfo,
+              targetScoreBefore,
+              targetScoreAfter: targetScoreBefore,
+              targetScoreDelta: 0
             },
-            scoreBefore,
-            scoreAfter: scoreBefore,
+            scoreBefore: aggregateBefore,
+            scoreAfter: aggregateBefore,
             scoreDelta: 0,
             evidenceRefs: repairRes.evidenceRefs,
             stopReason: 'zero_improvement_repair_stop'
@@ -565,11 +573,14 @@ export class TasteAuditAgentLoop {
           reasoning: decisionPayload.reasoning,
           actionPerformed: {
             action: 'repaired_with_verified_candidate',
-            candidateSelected: candidateInfo
+            candidateSelected: candidateInfo,
+            targetScoreBefore,
+            targetScoreAfter,
+            targetScoreDelta
           },
-          scoreBefore,
-          scoreAfter,
-          scoreDelta,
+          scoreBefore: aggregateBefore,
+          scoreAfter: aggregateAfter,
+          scoreDelta: aggregateDelta > 0 ? aggregateDelta : targetScoreDelta,
           evidenceRefs: repairRes.evidenceRefs
         });
 
@@ -631,7 +642,8 @@ export class TasteAuditAgentLoop {
         }
         actionHistory.add(actionKey);
 
-        const scoreBefore = targetEnvelope.audit ? targetEnvelope.audit.overallScore : currentAuditReport.overallScore;
+        const aggregateBefore = currentAuditReport.overallScore;
+        const targetScoreBefore = targetEnvelope.audit ? targetEnvelope.audit.overallScore : aggregateBefore;
         const oldSignalsCount = targetEnvelope.evidence?.signals.length ?? 0;
         const oldStatus = targetEnvelope.evidence?.status;
 
@@ -663,6 +675,7 @@ export class TasteAuditAgentLoop {
         }
 
         // Deterministic Re-Audit
+        targetEnvelope.initialAudit = targetEnvelope.initialAudit ?? targetEnvelope.audit;
         const newAudit = this.auditEngine.auditItem(targetEnvelope, evaluationContext);
         targetEnvelope.audit = newAudit;
 
@@ -671,8 +684,10 @@ export class TasteAuditAgentLoop {
           input
         );
 
-        const scoreAfter = newAudit.overallScore;
-        const scoreDelta = scoreAfter - scoreBefore;
+        const targetScoreAfter = newAudit.overallScore;
+        const targetScoreDelta = targetScoreAfter - targetScoreBefore;
+        const aggregateAfter = currentAuditReport.overallScore;
+        const aggregateDelta = aggregateAfter - aggregateBefore;
         const newSignalsCount = targetEnvelope.evidence?.signals.length ?? 0;
         const newStatus = targetEnvelope.evidence?.status;
 
@@ -682,7 +697,7 @@ export class TasteAuditAgentLoop {
           newSignalsCount > oldSignalsCount ||
           targetEnvelope.evidence?.provenance.classification === 'Supported';
 
-        if (!evidenceMateriallyImproved && scoreDelta <= 0) {
+        if (!evidenceMateriallyImproved && targetScoreDelta <= 0 && aggregateDelta <= 0) {
           logger.warn(
             `[AgentLoop] MORE_EVIDENCE on "${targetEnvelope.item.name}" yielded no material evidence improvement.`
           );
@@ -693,9 +708,14 @@ export class TasteAuditAgentLoop {
             targetItemId: targetEnvelope.item.id,
             targetItemName: targetEnvelope.item.name,
             reasoning: 'Additional Qloo evidence query yielded zero additional signals and no score improvement.',
-            actionPerformed: { action: 'evidence_query_unimproved' },
-            scoreBefore,
-            scoreAfter,
+            actionPerformed: {
+              action: 'evidence_query_unimproved',
+              targetScoreBefore,
+              targetScoreAfter: targetScoreBefore,
+              targetScoreDelta: 0
+            },
+            scoreBefore: aggregateBefore,
+            scoreAfter: aggregateBefore,
             scoreDelta: 0,
             evidenceRefs: targetEnvelope.evidence?.provenance ? [targetEnvelope.evidence.provenance.correlationId] : [],
             stopReason: 'insufficient_evidence_unimproved'
@@ -713,10 +733,15 @@ export class TasteAuditAgentLoop {
           targetItemId: targetEnvelope.item.id,
           targetItemName: targetEnvelope.item.name,
           reasoning: decisionPayload.reasoning,
-          actionPerformed: { action: 'retrieved_additional_qloo_evidence' },
-          scoreBefore,
-          scoreAfter,
-          scoreDelta,
+          actionPerformed: {
+            action: 'retrieved_additional_qloo_evidence',
+            targetScoreBefore,
+            targetScoreAfter,
+            targetScoreDelta
+          },
+          scoreBefore: aggregateBefore,
+          scoreAfter: aggregateAfter,
+          scoreDelta: aggregateDelta > 0 ? aggregateDelta : (currentEnvelopes.length === 1 ? targetScoreDelta : aggregateDelta),
           evidenceRefs: targetEnvelope.evidence?.provenance ? [targetEnvelope.evidence.provenance.correlationId] : []
         });
 

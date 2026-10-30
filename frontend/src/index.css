@@ -55,3 +55,17 @@ body {
 .animate-fade-in {
   animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Dynamic Recommendation Auto-Fit Grid */
+.dynamic-recommendation-grid {
+  display: grid;
+  gap: var(--grid-gap, 0.625rem);
+  grid-template-rows: auto;
+}
+
+@media (min-width: 768px) {
+  .dynamic-recommendation-grid {
+    grid-template-rows: var(--desktop-grid-rows, repeat(var(--item-count, 1), minmax(0, 1fr)));
+  }
+}
+
