@@ -11,7 +11,10 @@ dist/
 build/
 
 # Testing and coverage
-coverage/
+/coverage/
+backend/coverage/
+frontend/coverage/
+!backend/src/services/coverage/
 
 # Logs
 *.log

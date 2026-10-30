@@ -16,6 +16,8 @@ import { NormalizedEvidenceResult } from '../evidence/evidence.types.js';
 import { OverallRepairReport, RepairItemResult } from '../repair/repair.types.js';
 import { agentLoop as defaultAgentLoop, TasteAuditAgentLoop } from '../agent/agent.loop.js';
 import { AgentExecutionTrace } from '../agent/agent.types.js';
+import { coverageService as defaultCoverageService, CulturalCoverageService } from '../coverage/coverage.service.js';
+import { CulturalCoverageResult } from '../coverage/coverage.types.js';
 import { logger } from '../../utils/logger.js';
 
 export interface OrchestratorPipelineOptions {
@@ -30,19 +32,22 @@ export class TasteAuditOrchestrator {
   private readonly auditEngine: CulturalGroundingAuditEngine;
   private readonly repairSvc: RepairService;
   private readonly agentLoop: TasteAuditAgentLoop;
+  private readonly coverageSvc: CulturalCoverageService;
 
   constructor(
     resolutionSvc: EntityResolutionService = resolutionService,
     evidenceSvc: EvidenceRetrievalService = evidenceService,
     auditEng: CulturalGroundingAuditEngine = auditEngine,
     repairSvc: RepairService = repairService,
-    agentLoop: TasteAuditAgentLoop = defaultAgentLoop
+    agentLoop: TasteAuditAgentLoop = defaultAgentLoop,
+    coverageSvc: CulturalCoverageService = defaultCoverageService
   ) {
     this.resolutionSvc = resolutionSvc;
     this.evidenceSvc = evidenceSvc;
     this.auditEngine = auditEng;
     this.repairSvc = repairSvc;
     this.agentLoop = agentLoop;
+    this.coverageSvc = coverageSvc;
   }
 
   /**
@@ -239,6 +244,24 @@ export class TasteAuditOrchestrator {
       ? 'TasteAudit Stages 1 (PARSE), 2 (RESOLVE), 3 (RETRIEVE), 4 (AUDIT), and 5 (REPAIR) executed successfully.'
       : 'TasteAudit Stage 1 (PARSE), Stage 2 (RESOLVE), Stage 3 (RETRIEVE), and Stage 4 (AUDIT) executed successfully.';
 
+    // Cultural Coverage & Blind Spot Intelligence (Isolated; never modifies audit score)
+    let culturalCoverage: CulturalCoverageResult | undefined;
+    try {
+      culturalCoverage = await this.coverageSvc.analyzeCoverage(input, envelopes);
+    } catch (err) {
+      logger.warn('Cultural coverage analysis failed safely:', err);
+      culturalCoverage = {
+        status: 'UNAVAILABLE',
+        totalSupportedDirections: 0,
+        coveredDirectionsCount: 0,
+        blindSpotsCount: 0,
+        coveredDirections: [],
+        blindSpots: [],
+        summaryNote: 'Cultural coverage unavailable — the verified audit result above remains valid.',
+        generatedAt: new Date().toISOString()
+      };
+    }
+
     return {
       status: 'partial_pipeline',
       message,
@@ -251,6 +274,7 @@ export class TasteAuditOrchestrator {
       auditReport,
       repairReport,
       agentTrace,
+      culturalCoverage,
       scaffoldDetails: {
         note: options?.enableAgent
           ? 'Stage 6 (AGENT LOOP) is actively implemented with bounded iteration and structured trace.'

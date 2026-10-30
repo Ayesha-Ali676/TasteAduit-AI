@@ -107,7 +107,7 @@ export class EvidenceRetrievalService {
           signalType: 'taste_affinity',
           relatedEntityId: item.entity_id,
           relatedEntityName: item.name,
-          relatedEntityType: item.types && item.types.length > 0 ? item.types[0] : undefined,
+          relatedEntityType: item.types && item.types.length > 0 ? item.types[0] : targetType,
           value: affinityVal, // Empirical Qloo affinity; never fabricated
           rank: index + 1,
           relationship: 'high_taste_affinity',

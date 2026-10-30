@@ -3,6 +3,7 @@ import { NormalizedEvidenceResult } from '../evidence/evidence.types.js';
 import { ItemAuditResult, OverallAuditReport } from '../audit/audit.types.js';
 import { OverallRepairReport, RepairItemResult } from '../repair/repair.types.js';
 import { AgentExecutionTrace } from '../agent/agent.types.js';
+import { CulturalCoverageResult } from '../coverage/coverage.types.js';
 
 /**
  * Deterministic Scoring Weight Constants
@@ -219,6 +220,7 @@ export interface OrchestratorAuditResult {
   auditReport?: OverallAuditReport;
   repairReport?: OverallRepairReport;
   agentTrace?: AgentExecutionTrace;
+  culturalCoverage?: CulturalCoverageResult;
   scaffoldDetails?: {
     note: string;
     deterministicModelReady: boolean;

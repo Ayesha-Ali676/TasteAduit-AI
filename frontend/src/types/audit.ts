@@ -261,6 +261,7 @@ export interface AuditResponse {
   auditReport?: OverallAuditReport;
   repairReport?: OverallRepairReport;
   agentTrace?: AgentExecutionTrace;
+  culturalCoverage?: CulturalCoverageResult;
   scaffoldDetails?: {
     note: string;
     deterministicModelReady: boolean;
@@ -271,4 +272,46 @@ export interface AuditResponse {
       evidenceCompleteness: number;
     };
   };
+}
+
+
+export type CulturalDirectionStatus = 'COVERED' | 'BLIND_SPOT' | 'INSUFFICIENT_EVIDENCE';
+
+export interface CulturalDirection {
+  id: string;
+  label: string;
+  category?: string;
+  status: CulturalDirectionStatus;
+  confidence: number;
+  explanation: string;
+  evidenceRefs: string[];
+  representedBy?: string[];
+  relevanceScore?: number;
+}
+
+export interface QlooGroundedAlternative {
+  entityId: string;
+  name: string;
+  type?: string;
+  imageUrl?: string;
+  affinity?: number;
+  uncoveredDirection: string;
+  rationale: string;
+  provenanceRef: string;
+}
+
+export type CulturalCoverageStatus = 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'UNAVAILABLE';
+
+export interface CulturalCoverageResult {
+  status: CulturalCoverageStatus;
+  coverageRatio?: number;
+  coveragePercentage?: number;
+  totalSupportedDirections: number;
+  coveredDirectionsCount: number;
+  blindSpotsCount: number;
+  coveredDirections: CulturalDirection[];
+  blindSpots: CulturalDirection[];
+  alternative?: QlooGroundedAlternative;
+  summaryNote: string;
+  generatedAt: string;
 }

@@ -16,6 +16,7 @@ import {
   ZoomIn
 } from 'lucide-react';
 import { ImageLightboxModal } from './ImageLightboxModal';
+import { CulturalCoverageView } from './CulturalCoverageView';
 
 interface AuditResultsViewProps {
   response: AuditResponse;
@@ -1038,6 +1039,72 @@ export const AuditResultsView: React.FC<AuditResultsViewProps> = ({
             </div>
           </div>
         </section>
+      )}
+
+      {/* CULTURAL COVERAGE & BLIND SPOT INTELLIGENCE */}
+      {response.culturalCoverage && (
+        <CulturalCoverageView
+          coverage={response.culturalCoverage}
+          onOpenLightbox={openLightbox}
+          onSelectAlternativeForEvidence={(alt) => {
+            const matchingEnv = items.find(it => it.resolution?.resolvedEntity?.id === alt.entityId);
+            if (matchingEnv) {
+              onSelectEntityForEvidence(matchingEnv);
+            } else {
+              onSelectEntityForEvidence({
+                item: { id: alt.entityId, name: alt.name, category: alt.type },
+                resolution: {
+                  query: alt.name,
+                  status: 'resolved',
+                  resolvedEntity: {
+                    id: alt.entityId,
+                    name: alt.name,
+                    type: alt.type || 'urn:entity:creative_work',
+                    category: 'entity',
+                    imageUrl: alt.imageUrl,
+                    tags: [alt.uncoveredDirection],
+                    source: 'qloo',
+                    retrievedAt: new Date().toISOString()
+                  },
+                  candidates: [],
+                  provenance: {
+                    entityId: alt.entityId,
+                    qlooType: alt.type || 'urn:entity:creative_work',
+                    source: 'qloo',
+                    operation: 'blind_spot_alternative',
+                    correlationId: 'alt_view',
+                    retrievedAt: new Date().toISOString(),
+                    classification: 'Supported' as const,
+                    resolutionStatus: 'resolved' as const
+                  }
+                },
+                evidence: {
+                  status: 'supported',
+                  entityId: alt.entityId,
+                  entityName: alt.name,
+                  signals: [
+                    {
+                      signalType: 'taste_affinity',
+                      relatedEntityName: alt.name,
+                      value: alt.affinity,
+                      tags: [alt.uncoveredDirection]
+                    }
+                  ],
+                  summary: { signalsCount: 1, hasLocationSignal: false },
+                  provenance: {
+                    source: 'qloo',
+                    endpoint: '/v2/insights',
+                    operation: 'blind_spot_alternative',
+                    correlationId: 'alt_view',
+                    retrievedAt: new Date().toISOString(),
+                    queryMetadata: {},
+                    classification: 'Supported'
+                  }
+                }
+              });
+            }
+          }}
+        />
       )}
 
       {/* 3. AUDIT FINDINGS & EVIDENCE STATES */}
