@@ -140,11 +140,10 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
                   key={sc.id}
                   type="button"
                   onClick={() => handleSelectScenario(sc)}
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs transition-all cursor-pointer ${
-                    isSelected
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs transition-all cursor-pointer ${isSelected
                       ? 'bg-sage-dark text-white font-bold shadow-sm'
                       : 'bg-white hover:bg-sage-mint/40 text-sage-dark border border-sage-mint shadow-xs'
-                  }`}
+                    }`}
                   title={isSelected ? 'Click to deselect scenario' : `Load ${sc.name} starter example`}
                 >
                   {sc.isFlagship && <span>⭐</span>}
@@ -201,7 +200,7 @@ export const RecommendationComposer: React.FC<RecommendationComposerProps> = ({
               setFormData((prev) => ({ ...prev, recommendations: e.target.value }));
               if (validationError) setValidationError(null);
             }}
-            placeholder="e.g. Recommend 3 movies similar to Pulp Fiction"
+            placeholder="Paste the AI's recommendation answer here — e.g. ChatGPT's full response with recommended movies, restaurants, or artists"
             className="w-full bg-[#FAFDF9] border border-sage-mint focus:border-sage focus:ring-2 focus:ring-sage/20 rounded-2xl p-4 sm:p-5 text-base sm:text-lg text-sage-dark placeholder-sage-soft transition leading-relaxed resize-none font-normal outline-none"
           />
 
